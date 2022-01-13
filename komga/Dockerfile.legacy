@@ -9,4 +9,4 @@ COPY ${DEPENDENCY}/application/ ./
 ENV KOMGA_CONFIGDIR="/config"
 ENV LC_ALL=en_US.UTF-8
 ENTRYPOINT ["java", "org.springframework.boot.loader.JarLauncher", "--spring.config.additional-location=file:/config/"]
-EXPOSE 8080
+EXPOSE 18514
