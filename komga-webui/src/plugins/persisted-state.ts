@@ -13,6 +13,7 @@ export const persistedModule: Module<any, any> = {
       continuous: {
         scale: '',
         padding: '',
+        margin: '',
       },
       readingDirection: '',
       swipe: false,
@@ -22,6 +23,7 @@ export const persistedModule: Module<any, any> = {
     },
     epubreader: {},
     browsingPageSize: undefined as unknown as number,
+    thumbnailsPageSize: undefined as unknown as number,
     collection: {
       filter: {},
     },
@@ -29,8 +31,15 @@ export const persistedModule: Module<any, any> = {
       filter: {},
     },
     library: {
+      // DEPRECATED: this is the old filter, before criteria-dsl was introduced
       filter: {},
+      // this is the criteria-dsl filter, incompatible with the previous one
+      filterDsl: {},
+      filterMode: {},
       sort: {},
+      filterDslBooks: {},
+      filterModeBooks: {},
+      sortBooks: {},
       route: {},
     },
     importPath: '',
@@ -63,10 +72,22 @@ export const persistedModule: Module<any, any> = {
       return state.readList.filter[id]
     },
     getLibraryFilter: (state) => (id: string) => {
-      return state.library.filter[id]
+      return state.library.filterDsl[id]
+    },
+    getLibraryFilterBooks: (state) => (id: string) => {
+      return state.library.filterDslBooks[id]
+    },
+    getLibraryFilterMode: (state) => (id: string) => {
+      return state.library.filterMode[id]
+    },
+    getLibraryFilterModeBooks: (state) => (id: string) => {
+      return state.library.filterModeBooks[id]
     },
     getLibrarySort: (state) => (id: string) => {
       return state.library.sort[id]
+    },
+    getLibrarySortBooks: (state) => (id: string) => {
+      return state.library.sortBooks[id]
     },
     getLibraryRoute: (state) => (id: string) => {
       return state.library.route[id]
@@ -91,6 +112,9 @@ export const persistedModule: Module<any, any> = {
     setWebreaderContinuousPadding(state, val) {
       state.webreader.continuous.padding = val
     },
+    setWebreaderContinuousMargin(state, val) {
+      state.webreader.continuous.margin = val
+    },
     setWebreaderReadingDirection(state, val) {
       state.webreader.readingDirection = val
     },
@@ -112,6 +136,9 @@ export const persistedModule: Module<any, any> = {
     setBrowsingPageSize(state, val) {
       state.browsingPageSize = val
     },
+    setThumbnailsPageSize(state, val) {
+      state.thumbnailsPageSize = val
+    },
     setCollectionFilter(state, {id, filter}) {
       state.collection.filter[id] = filter
     },
@@ -119,10 +146,22 @@ export const persistedModule: Module<any, any> = {
       state.readList.filter[id] = filter
     },
     setLibraryFilter(state, {id, filter}) {
-      state.library.filter[id] = filter
+      state.library.filterDsl[id] = filter
+    },
+    setLibraryFilterBooks(state, {id, filter}) {
+      state.library.filterDslBooks[id] = filter
+    },
+    setLibraryFilterMode(state, {id, filterMode: filterMode}) {
+      state.library.filterMode[id] = filterMode
+    },
+    setLibraryFilterModeBooks(state, {id, filterMode: filterMode}) {
+      state.library.filterModeBooks[id] = filterMode
     },
     setLibrarySort(state, {id, sort}) {
       state.library.sort[id] = sort
+    },
+    setLibrarySortBooks(state, {id, sort}) {
+      state.library.sortBooks[id] = sort
     },
     setLibraryRoute(state, {id, route}) {
       state.library.route[id] = route

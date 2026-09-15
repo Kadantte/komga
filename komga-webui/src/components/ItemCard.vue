@@ -12,7 +12,9 @@
           :src="thumbnailUrl"
           :lazy-src="thumbnailError ? coverBase64 : undefined"
           aspect-ratio="0.7071"
-          contain
+          :contain="!isStretch"
+          :position="isStretch ? 'top' : undefined"
+          :class="shouldBlurPoster ? 'blur' : undefined"
           @error="thumbnailError = true"
           @load="thumbnailError = false"
         >
@@ -48,7 +50,7 @@
 
               <!-- FAB reading (center) -->
               <v-btn
-                v-if="bookReady && !selected && !preselect && canReadPages"
+                v-if="showFab"
                 fab
                 x-large
                 color="accent"
@@ -175,6 +177,7 @@ import {
 import {coverBase64} from '@/types/image'
 import {ReadListDto} from '@/types/komga-readlists'
 import OneShotActionsMenu from '@/components/menus/OneshotActionsMenu.vue'
+import {CLIENT_SETTING} from '@/types/komga-clientsettings'
 
 export default Vue.extend({
   name: 'ItemCard',
@@ -230,6 +233,11 @@ export default Vue.extend({
       type: Boolean,
       default: true,
     },
+    // force disable fab
+    disableFab: {
+      type: Boolean,
+      default: false,
+    },
   },
   data: () => {
     return {
@@ -267,11 +275,20 @@ export default Vue.extend({
     this.$eventHub.$off(THUMBNAILCOLLECTION_DELETED, this.thumbnailCollectionChanged)
   },
   computed: {
+    isStretch(): boolean {
+      return this.$store.getters.getClientSettings[CLIENT_SETTING.WEBUI_POSTER_STRETCH]?.value === 'true'
+    },
+    isBlurUnread(): boolean {
+      return this.$store.getters.getClientSettings[CLIENT_SETTING.WEBUI_POSTER_BLUR_UNREAD]?.value === 'true'
+    },
+    shouldBlurPoster(): boolean | undefined {
+      return (this.isUnread || this.allUnread) && this.isBlurUnread
+    },
     canReadPages(): boolean {
       return this.$store.getters.mePageStreaming && this.computedItem.type() === ItemTypes.BOOK
     },
     overlay(): boolean {
-      return this.onEdit !== undefined || this.onSelected !== undefined || this.bookReady || this.canReadPages || this.actionMenu
+      return this.onEdit !== undefined || this.onSelected !== undefined || this.showFab || this.actionMenu
     },
     computedItem(): Item<BookDto | SeriesDto | CollectionDto | ReadListDto> {
       let item = this.item
@@ -307,6 +324,10 @@ export default Vue.extend({
       if (this.computedItem.type() === ItemTypes.SERIES) return (this.item as SeriesDto).booksUnreadCount + (this.item as SeriesDto).booksInProgressCount
       return undefined
     },
+    allUnread(): boolean | undefined {
+      if (this.computedItem.type() === ItemTypes.SERIES) return (this.item as SeriesDto).booksCount == (this.item as SeriesDto).booksUnreadCount
+      return undefined
+    },
     readProgressPercentage(): number {
       if (this.computedItem.type() === ItemTypes.BOOK) return getReadProgressPercentage(this.item as BookDto)
       return 0
@@ -316,6 +337,9 @@ export default Vue.extend({
         return (this.item as BookDto).media.status === 'READY'
       }
       return false
+    },
+    showFab(): boolean {
+      return !this.disableFab && this.bookReady && !this.selected && !this.preselect && this.canReadPages
     },
     to(): RawLocation {
       return this.computedItem.to()
@@ -372,6 +396,10 @@ export default Vue.extend({
 </script>
 
 <style>
+.blur > .v-image__image {
+  filter: blur(5px);
+}
+
 .no-link {
   cursor: default;
 }

@@ -1,18 +1,18 @@
 package org.gotson.komga.infrastructure.jooq.main
 
-import io.github.oshai.kotlinlogging.KotlinLogging
-import org.gotson.komga.domain.model.ContentRestrictions
-import org.gotson.komga.domain.model.ReadStatus
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchField
 import org.gotson.komga.domain.model.SeriesSearch
-import org.gotson.komga.domain.model.SeriesSearchWithReadProgress
 import org.gotson.komga.infrastructure.datasource.SqliteUdfDataSource
+import org.gotson.komga.infrastructure.jooq.RequiredJoin
+import org.gotson.komga.infrastructure.jooq.SeriesSearchHelper
+import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
+import org.gotson.komga.infrastructure.jooq.TempTable.Companion.withTempTable
+import org.gotson.komga.infrastructure.jooq.csAlias
 import org.gotson.komga.infrastructure.jooq.inOrNoCondition
-import org.gotson.komga.infrastructure.jooq.insertTempStrings
-import org.gotson.komga.infrastructure.jooq.noCase
-import org.gotson.komga.infrastructure.jooq.selectTempStrings
 import org.gotson.komga.infrastructure.jooq.sortByValues
-import org.gotson.komga.infrastructure.jooq.toCondition
 import org.gotson.komga.infrastructure.jooq.toSortField
+import org.gotson.komga.infrastructure.jooq.unicode3
 import org.gotson.komga.infrastructure.search.LuceneEntity
 import org.gotson.komga.infrastructure.search.LuceneHelper
 import org.gotson.komga.infrastructure.web.toFilePath
@@ -38,6 +38,7 @@ import org.jooq.impl.DSL.count
 import org.jooq.impl.DSL.countDistinct
 import org.jooq.impl.DSL.lower
 import org.jooq.impl.DSL.substring
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -45,10 +46,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Component
-import org.springframework.transaction.support.TransactionTemplate
 import java.net.URL
-
-private val logger = KotlinLogging.logger {}
 
 const val BOOKS_UNREAD_COUNT = "booksUnreadCount"
 const val BOOKS_IN_PROGRESS_COUNT = "booksInProgressCount"
@@ -56,11 +54,12 @@ const val BOOKS_READ_COUNT = "booksReadCount"
 
 @Component
 class SeriesDtoDao(
-  private val dsl: DSLContext,
+  dslRW: DSLContext,
+  @Qualifier("dslContextRO") dslRO: DSLContext,
   private val luceneHelper: LuceneHelper,
-  @Value("#{@komgaProperties.database.batchChunkSize}") private val batchSize: Int,
-  private val transactionTemplate: TransactionTemplate,
-) : SeriesDtoRepository {
+  @param:Value("#{@komgaProperties.database.batchChunkSize}") private val batchSize: Int,
+) : SplitDslDaoBase(dslRW, dslRO),
+  SeriesDtoRepository {
   private val s = Tables.SERIES
   private val d = Tables.SERIES_METADATA
   private val rs = Tables.READ_PROGRESS_SERIES
@@ -84,81 +83,93 @@ class SeriesDtoDao(
 
   private val sorts =
     mapOf(
-      "metadata.titleSort" to d.TITLE_SORT.noCase(),
+      "metadata.titleSort" to d.TITLE_SORT.unicode3(),
       "createdDate" to s.CREATED_DATE,
       "created" to s.CREATED_DATE,
       "lastModifiedDate" to s.LAST_MODIFIED_DATE,
       "lastModified" to s.LAST_MODIFIED_DATE,
       "booksMetadata.releaseDate" to bma.RELEASE_DATE,
+      "readDate" to rs.MOST_RECENT_READ_DATE,
       "collection.number" to cs.NUMBER,
-      "name" to s.NAME.collate(SqliteUdfDataSource.COLLATION_UNICODE_3),
+      "name" to s.NAME.unicode3(),
       "booksCount" to s.BOOK_COUNT,
+      "random" to DSL.rand(),
     )
 
+  override fun findAll(pageable: Pageable): Page<SeriesDto> = findAll(SeriesSearch(), SearchContext.ofAnonymousUser(), pageable)
+
   override fun findAll(
-    search: SeriesSearchWithReadProgress,
-    userId: String,
+    context: SearchContext,
     pageable: Pageable,
-    restrictions: ContentRestrictions,
-  ): Page<SeriesDto> {
-    val conditions = search.toCondition().and(restrictions.toCondition(dsl))
+  ): Page<SeriesDto> = findAll(SeriesSearch(), context, pageable)
 
-    return findAll(conditions, userId, pageable, search.toJoinConditions(), search.searchTerm)
-  }
-
-  override fun findAllByCollectionId(
-    collectionId: String,
-    search: SeriesSearchWithReadProgress,
-    userId: String,
+  override fun findAll(
+    search: SeriesSearch,
+    context: SearchContext,
     pageable: Pageable,
-    restrictions: ContentRestrictions,
   ): Page<SeriesDto> {
-    val conditions = search.toCondition().and(restrictions.toCondition(dsl)).and(cs.COLLECTION_ID.eq(collectionId))
-    val joinConditions = search.toJoinConditions().copy(selectCollectionNumber = true, collection = true)
+    requireNotNull(context.userId) { "Missing userId in search context" }
 
-    return findAll(conditions, userId, pageable, joinConditions, search.searchTerm)
+    val (conditions, joins) = SeriesSearchHelper(context).toCondition(search.condition)
+    val conditionsRefined = conditions.and(search.regexSearch?.let { it.second.toColumn().likeRegex(it.first) } ?: DSL.noCondition())
+
+    return findAll(conditionsRefined, context.userId, pageable, joins, search.fullTextSearch)
   }
 
   override fun findAllRecentlyUpdated(
-    search: SeriesSearchWithReadProgress,
-    userId: String,
-    restrictions: ContentRestrictions,
+    search: SeriesSearch,
+    context: SearchContext,
     pageable: Pageable,
   ): Page<SeriesDto> {
-    val conditions =
-      search.toCondition()
-        .and(restrictions.toCondition(dsl))
-        .and(s.CREATED_DATE.notEqual(s.LAST_MODIFIED_DATE))
+    requireNotNull(context.userId) { "Missing userId in search context" }
 
-    return findAll(conditions, userId, pageable, search.toJoinConditions(), search.searchTerm)
+    val (conditions, joins) = SeriesSearchHelper(context).toCondition(search.condition)
+    val conditionsRefined = conditions.and(s.CREATED_DATE.notEqual(s.LAST_MODIFIED_DATE))
+
+    return findAll(conditionsRefined, context.userId, pageable, joins, search.fullTextSearch)
   }
 
   override fun countByFirstCharacter(
-    search: SeriesSearchWithReadProgress,
-    userId: String,
-    restrictions: ContentRestrictions,
+    search: SeriesSearch,
+    context: SearchContext,
   ): List<GroupCountDto> {
-    val conditions = search.toCondition().and(restrictions.toCondition(dsl))
-    val joinConditions = search.toJoinConditions()
-    val seriesIds = luceneHelper.searchEntitiesIds(search.searchTerm, LuceneEntity.Series)
+    requireNotNull(context.userId) { "Missing userId in search context" }
+
+    val (conditions, joins) = SeriesSearchHelper(context).toCondition(search.condition)
+    val conditionsRefined = conditions.and(search.regexSearch?.let { it.second.toColumn().likeRegex(it.first) } ?: DSL.noCondition())
+
+    val seriesIds = luceneHelper.searchEntitiesIds(search.fullTextSearch, LuceneEntity.Series)
     val searchCondition = s.ID.inOrNoCondition(seriesIds)
 
     val firstChar = lower(substring(d.TITLE_SORT, 1, 1))
-    return dsl.select(firstChar, count())
+    return dslRO
+      .select(firstChar, count())
       .from(s)
-      .leftJoin(d).on(s.ID.eq(d.SERIES_ID))
-      .leftJoin(bma).on(s.ID.eq(bma.SERIES_ID))
-      .leftJoin(rs).on(s.ID.eq(rs.SERIES_ID)).and(readProgressConditionSeries(userId))
-      .apply { if (joinConditions.genre) leftJoin(g).on(s.ID.eq(g.SERIES_ID)) }
+      .leftJoin(d)
+      .on(s.ID.eq(d.SERIES_ID))
+      .leftJoin(bma)
+      .on(s.ID.eq(bma.SERIES_ID))
+      .leftJoin(rs)
+      .on(s.ID.eq(rs.SERIES_ID))
+      .and(readProgressConditionSeries(context.userId))
       .apply {
-        if (joinConditions.tag)
-          leftJoin(st).on(s.ID.eq(st.SERIES_ID))
-            .leftJoin(bmat).on(s.ID.eq(bmat.SERIES_ID))
-      }
-      .apply { if (joinConditions.collection) leftJoin(cs).on(s.ID.eq(cs.SERIES_ID)) }
-      .apply { if (joinConditions.aggregationAuthor) leftJoin(bmaa).on(s.ID.eq(bmaa.SERIES_ID)) }
-      .apply { if (joinConditions.sharingLabel) leftJoin(sl).on(s.ID.eq(sl.SERIES_ID)) }
-      .where(conditions)
+        joins.forEach { join ->
+          when (join) {
+            is RequiredJoin.Collection -> {
+              val csAlias = csAlias(join.collectionId)
+              leftJoin(csAlias).on(s.ID.eq(csAlias.SERIES_ID).and(csAlias.COLLECTION_ID.eq(join.collectionId)))
+            }
+            // always joined
+            is RequiredJoin.ReadProgress -> Unit
+            RequiredJoin.SeriesMetadata -> Unit
+            // Book joins - not needed
+            RequiredJoin.Media -> Unit
+            RequiredJoin.BookMetadata -> Unit
+            RequiredJoin.BookMetadataAggregation -> Unit
+            is RequiredJoin.ReadList -> Unit
+          }
+        }
+      }.where(conditionsRefined)
       .and(searchCondition)
       .groupBy(firstChar)
       .map {
@@ -170,76 +181,111 @@ class SeriesDtoDao(
     seriesId: String,
     userId: String,
   ): SeriesDto? =
-    selectBase(userId)
+    dslRO
+      .selectBase(userId)
       .where(s.ID.eq(seriesId))
       .groupBy(*groupFields)
-      .fetchAndMap()
+      .fetchAndMap(dslRO)
       .firstOrNull()
 
-  private fun selectBase(
+  private fun DSLContext.selectBase(
     userId: String,
-    joinConditions: JoinConditions = JoinConditions(),
+    joins: Set<RequiredJoin> = emptySet(),
   ): SelectOnConditionStep<Record> =
-    dsl.selectDistinct(*groupFields)
-      .apply { if (joinConditions.selectCollectionNumber) select(cs.NUMBER) }
+    this
+      .select(*groupFields)
       .from(s)
-      .leftJoin(d).on(s.ID.eq(d.SERIES_ID))
-      .leftJoin(bma).on(s.ID.eq(bma.SERIES_ID))
-      .leftJoin(rs).on(s.ID.eq(rs.SERIES_ID)).and(readProgressConditionSeries(userId))
-      .apply { if (joinConditions.genre) leftJoin(g).on(s.ID.eq(g.SERIES_ID)) }
+      .leftJoin(d)
+      .on(s.ID.eq(d.SERIES_ID))
+      .leftJoin(bma)
+      .on(s.ID.eq(bma.SERIES_ID))
+      .leftJoin(rs)
+      .on(s.ID.eq(rs.SERIES_ID))
+      .and(readProgressConditionSeries(userId))
       .apply {
-        if (joinConditions.tag)
-          leftJoin(st).on(s.ID.eq(st.SERIES_ID))
-            .leftJoin(bmat).on(s.ID.eq(bmat.SERIES_ID))
+        joins.forEach { join ->
+          when (join) {
+            is RequiredJoin.Collection -> {
+              val csAlias = csAlias(join.collectionId)
+              leftJoin(csAlias).on(s.ID.eq(csAlias.SERIES_ID).and(csAlias.COLLECTION_ID.eq(join.collectionId)))
+            }
+            // always joined
+            is RequiredJoin.ReadProgress -> Unit
+            RequiredJoin.SeriesMetadata -> Unit
+            // Book joins - not needed
+            RequiredJoin.BookMetadata -> Unit
+            RequiredJoin.BookMetadataAggregation -> Unit
+            RequiredJoin.Media -> Unit
+            is RequiredJoin.ReadList -> Unit
+          }
+        }
       }
-      .apply { if (joinConditions.collection) leftJoin(cs).on(s.ID.eq(cs.SERIES_ID)) }
-      .apply { if (joinConditions.aggregationAuthor) leftJoin(bmaa).on(s.ID.eq(bmaa.SERIES_ID)) }
-      .apply { if (joinConditions.sharingLabel) leftJoin(sl).on(s.ID.eq(sl.SERIES_ID)) }
 
   private fun findAll(
     conditions: Condition,
     userId: String,
     pageable: Pageable,
-    joinConditions: JoinConditions = JoinConditions(),
-    searchTerm: String?,
+    joins: Set<RequiredJoin> = emptySet(),
+    searchTerm: String? = null,
   ): Page<SeriesDto> {
     val seriesIds = luceneHelper.searchEntitiesIds(searchTerm, LuceneEntity.Series)
     val searchCondition = s.ID.inOrNoCondition(seriesIds)
 
     val count =
-      dsl.select(countDistinct(s.ID))
+      dslRO
+        .select(countDistinct(s.ID))
         .from(s)
-        .leftJoin(d).on(s.ID.eq(d.SERIES_ID))
-        .leftJoin(bma).on(s.ID.eq(bma.SERIES_ID))
-        .leftJoin(rs).on(s.ID.eq(rs.SERIES_ID)).and(readProgressConditionSeries(userId))
-        .apply { if (joinConditions.genre) leftJoin(g).on(s.ID.eq(g.SERIES_ID)) }
+        .leftJoin(d)
+        .on(s.ID.eq(d.SERIES_ID))
+        .leftJoin(bma)
+        .on(s.ID.eq(bma.SERIES_ID))
+        .leftJoin(rs)
+        .on(s.ID.eq(rs.SERIES_ID))
+        .and(readProgressConditionSeries(userId))
         .apply {
-          if (joinConditions.tag)
-            leftJoin(st).on(s.ID.eq(st.SERIES_ID))
-              .leftJoin(bmat).on(s.ID.eq(bmat.SERIES_ID))
-        }
-        .apply { if (joinConditions.collection) leftJoin(cs).on(s.ID.eq(cs.SERIES_ID)) }
-        .apply { if (joinConditions.aggregationAuthor) leftJoin(bmaa).on(s.ID.eq(bmaa.SERIES_ID)) }
-        .apply { if (joinConditions.sharingLabel) leftJoin(sl).on(s.ID.eq(sl.SERIES_ID)) }
-        .where(conditions)
+          joins.forEach { join ->
+            when (join) {
+              is RequiredJoin.Collection -> {
+                val csAlias = csAlias(join.collectionId)
+                leftJoin(csAlias).on(s.ID.eq(csAlias.SERIES_ID).and(csAlias.COLLECTION_ID.eq(join.collectionId)))
+              }
+              // always joined
+              is RequiredJoin.ReadProgress -> Unit
+              RequiredJoin.SeriesMetadata -> Unit
+              // Book joins - not needed
+              RequiredJoin.BookMetadata -> Unit
+              RequiredJoin.BookMetadataAggregation -> Unit
+              RequiredJoin.Media -> Unit
+              is RequiredJoin.ReadList -> Unit
+            }
+          }
+        }.where(conditions)
         .and(searchCondition)
         .fetchOne(countDistinct(s.ID)) ?: 0
 
     val orderBy =
       pageable.sort.mapNotNull {
-        if (it.property == "relevance" && !seriesIds.isNullOrEmpty())
+        if (it.property == "relevance" && !seriesIds.isNullOrEmpty()) {
           s.ID.sortByValues(seriesIds, it.isAscending)
-        else
-          it.toSortField(sorts)
+        } else {
+          if (it.property == "collection.number") {
+            val collectionId = joins.filterIsInstance<RequiredJoin.Collection>().firstOrNull()?.collectionId ?: return@mapNotNull null
+            val f = csAlias(collectionId).NUMBER
+            if (it.isAscending) f.asc() else f.desc()
+          } else {
+            it.toSortField(sorts)
+          }
+        }
       }
 
     val dtos =
-      selectBase(userId, joinConditions)
+      dslRO
+        .selectBase(userId, joins)
         .where(conditions)
         .and(searchCondition)
         .orderBy(orderBy)
         .apply { if (pageable.isPaged) limit(pageable.pageSize).offset(pageable.offset) }
-        .fetchAndMap()
+        .fetchAndMap(dslRO)
 
     val pageSort = if (orderBy.isNotEmpty()) pageable.sort else Sort.unsorted()
     return PageImpl(
@@ -254,7 +300,7 @@ class SeriesDtoDao(
 
   private fun readProgressConditionSeries(userId: String): Condition = rs.USER_ID.eq(userId).or(rs.USER_ID.isNull)
 
-  private fun ResultQuery<Record>.fetchAndMap(): MutableList<SeriesDto> {
+  private fun ResultQuery<Record>.fetchAndMap(dsl: DSLContext): MutableList<SeriesDto> {
     val records = fetch()
     val seriesIds = records.getValues(s.ID)
 
@@ -265,42 +311,49 @@ class SeriesDtoDao(
     lateinit var alternateTitles: Map<String, List<AlternateTitleDto>>
     lateinit var aggregatedAuthors: Map<String, List<AuthorDto>>
     lateinit var aggregatedTags: Map<String, List<String>>
-    transactionTemplate.executeWithoutResult {
-      dsl.insertTempStrings(batchSize, seriesIds)
+
+    dsl.withTempTable(batchSize, seriesIds).use { tempTable ->
       genres =
-        dsl.selectFrom(g)
-          .where(g.SERIES_ID.`in`(dsl.selectTempStrings()))
+        dsl
+          .selectFrom(g)
+          .where(g.SERIES_ID.`in`(tempTable.selectTempStrings()))
           .groupBy({ it.seriesId }, { it.genre })
 
       tags =
-        dsl.selectFrom(st)
-          .where(st.SERIES_ID.`in`(dsl.selectTempStrings()))
+        dsl
+          .selectFrom(st)
+          .where(st.SERIES_ID.`in`(tempTable.selectTempStrings()))
           .groupBy({ it.seriesId }, { it.tag })
 
       sharingLabels =
-        dsl.selectFrom(sl)
-          .where(sl.SERIES_ID.`in`(dsl.selectTempStrings()))
+        dsl
+          .selectFrom(sl)
+          .where(sl.SERIES_ID.`in`(tempTable.selectTempStrings()))
           .groupBy({ it.seriesId }, { it.label })
 
       links =
-        dsl.selectFrom(slk)
-          .where(slk.SERIES_ID.`in`(dsl.selectTempStrings()))
+        dsl
+          .selectFrom(slk)
+          .where(slk.SERIES_ID.`in`(tempTable.selectTempStrings()))
           .groupBy({ it.seriesId }, { WebLinkDto(it.label, it.url) })
 
       alternateTitles =
-        dsl.selectFrom(sat)
-          .where(sat.SERIES_ID.`in`(dsl.selectTempStrings()))
+        dsl
+          .selectFrom(sat)
+          .where(sat.SERIES_ID.`in`(tempTable.selectTempStrings()))
           .groupBy({ it.seriesId }, { AlternateTitleDto(it.label, it.title) })
 
       aggregatedAuthors =
-        dsl.selectFrom(bmaa)
-          .where(bmaa.SERIES_ID.`in`(dsl.selectTempStrings()))
+        dsl
+          .selectFrom(bmaa)
+          .where(bmaa.SERIES_ID.`in`(tempTable.selectTempStrings()))
           .filter { it.name != null }
           .groupBy({ it.seriesId }, { AuthorDto(it.name, it.role) })
 
       aggregatedTags =
-        dsl.selectFrom(bmat)
-          .where(bmat.SERIES_ID.`in`(dsl.selectTempStrings()))
+        dsl
+          .selectFrom(bmat)
+          .where(bmat.SERIES_ID.`in`(tempTable.selectTempStrings()))
           .groupBy({ it.seriesId }, { it.tag })
     }
 
@@ -325,76 +378,11 @@ class SeriesDtoDao(
       }
   }
 
-  private fun SeriesSearchWithReadProgress.toCondition(): Condition {
-    var c = DSL.noCondition()
-
-    if (libraryIds != null) c = c.and(s.LIBRARY_ID.`in`(libraryIds))
-    if (!collectionIds.isNullOrEmpty()) c = c.and(cs.COLLECTION_ID.`in`(collectionIds))
-    searchRegex?.let { c = c.and((it.second.toColumn()).likeRegex(it.first)) }
-    if (!metadataStatus.isNullOrEmpty()) c = c.and(d.STATUS.`in`(metadataStatus))
-    if (!publishers.isNullOrEmpty()) c = c.and(d.PUBLISHER.collate(SqliteUdfDataSource.COLLATION_UNICODE_3).`in`(publishers))
-    if (deleted == true) c = c.and(s.DELETED_DATE.isNotNull)
-    if (deleted == false) c = c.and(s.DELETED_DATE.isNull)
-    if (complete == false) c = c.and(d.TOTAL_BOOK_COUNT.isNotNull.and(d.TOTAL_BOOK_COUNT.ne(s.BOOK_COUNT)))
-    if (complete == true) c = c.and(d.TOTAL_BOOK_COUNT.isNotNull.and(d.TOTAL_BOOK_COUNT.eq(s.BOOK_COUNT)))
-    if (oneshot != null) c = c.and(s.ONESHOT.eq(oneshot))
-    if (!languages.isNullOrEmpty()) c = c.and(d.LANGUAGE.collate(SqliteUdfDataSource.COLLATION_UNICODE_3).`in`(languages))
-    if (!genres.isNullOrEmpty()) c = c.and(g.GENRE.collate(SqliteUdfDataSource.COLLATION_UNICODE_3).`in`(genres))
-    if (!tags.isNullOrEmpty()) c = c.and(st.TAG.collate(SqliteUdfDataSource.COLLATION_UNICODE_3).`in`(tags).or(bmat.TAG.collate(SqliteUdfDataSource.COLLATION_UNICODE_3).`in`(tags)))
-    if (!ageRatings.isNullOrEmpty()) {
-      val c1 = if (ageRatings.contains(null)) d.AGE_RATING.isNull else DSL.noCondition()
-      val c2 = if (ageRatings.filterNotNull().isNotEmpty()) d.AGE_RATING.`in`(ageRatings.filterNotNull()) else DSL.noCondition()
-      c = c.and(c1.or(c2))
-    }
-    // cast to String is necessary for SQLite, else the years in the IN block are coerced to Int, even though YEAR for SQLite uses strftime (string)
-    if (!releaseYears.isNullOrEmpty()) c = c.and(DSL.year(bma.RELEASE_DATE).cast(String::class.java).`in`(releaseYears))
-    if (!authors.isNullOrEmpty()) {
-      var ca = DSL.noCondition()
-      authors.forEach {
-        ca = ca.or(bmaa.NAME.equalIgnoreCase(it.name).and(bmaa.ROLE.equalIgnoreCase(it.role)))
-      }
-      c = c.and(ca)
-    }
-    if (!sharingLabels.isNullOrEmpty()) c = c.and(sl.LABEL.collate(SqliteUdfDataSource.COLLATION_UNICODE_3).`in`(sharingLabels))
-    if (!readStatus.isNullOrEmpty()) {
-      val cr =
-        readStatus.map {
-          when (it) {
-            ReadStatus.UNREAD -> rs.READ_COUNT.isNull
-            ReadStatus.READ -> rs.READ_COUNT.eq(s.BOOK_COUNT)
-            ReadStatus.IN_PROGRESS -> rs.READ_COUNT.ne(s.BOOK_COUNT)
-          }
-        }.reduce { acc, condition -> acc.or(condition) }
-      c = c.and(cr)
-    }
-
-    return c
-  }
-
-  private fun SeriesSearch.SearchField.toColumn() =
+  private fun SearchField.toColumn() =
     when (this) {
-      SeriesSearch.SearchField.NAME -> s.NAME
-      SeriesSearch.SearchField.TITLE -> d.TITLE
-      SeriesSearch.SearchField.TITLE_SORT -> d.TITLE_SORT
+      SearchField.TITLE -> d.TITLE
+      SearchField.TITLE_SORT -> d.TITLE_SORT
     }
-
-  private fun SeriesSearchWithReadProgress.toJoinConditions() =
-    JoinConditions(
-      genre = !genres.isNullOrEmpty(),
-      tag = !tags.isNullOrEmpty(),
-      collection = !collectionIds.isNullOrEmpty(),
-      aggregationAuthor = !authors.isNullOrEmpty(),
-      sharingLabel = !sharingLabels.isNullOrEmpty(),
-    )
-
-  private data class JoinConditions(
-    val selectCollectionNumber: Boolean = false,
-    val genre: Boolean = false,
-    val tag: Boolean = false,
-    val collection: Boolean = false,
-    val aggregationAuthor: Boolean = false,
-    val sharingLabel: Boolean = false,
-  )
 
   private fun SeriesRecord.toDto(
     booksCount: Int,
@@ -403,24 +391,23 @@ class SeriesDtoDao(
     booksInProgressCount: Int,
     metadata: SeriesMetadataDto,
     booksMetadata: BookMetadataAggregationDto,
-  ) =
-    SeriesDto(
-      id = id,
-      libraryId = libraryId,
-      name = name,
-      url = URL(url).toFilePath(),
-      created = createdDate,
-      lastModified = lastModifiedDate,
-      fileLastModified = fileLastModified,
-      booksCount = booksCount,
-      booksReadCount = booksReadCount,
-      booksUnreadCount = booksUnreadCount,
-      booksInProgressCount = booksInProgressCount,
-      metadata = metadata,
-      booksMetadata = booksMetadata,
-      deleted = deletedDate != null,
-      oneshot = oneshot,
-    )
+  ) = SeriesDto(
+    id = id,
+    libraryId = libraryId,
+    name = name,
+    url = URL(url).toFilePath(),
+    created = createdDate,
+    lastModified = lastModifiedDate,
+    fileLastModified = fileLastModified,
+    booksCount = booksCount,
+    booksReadCount = booksReadCount,
+    booksUnreadCount = booksUnreadCount,
+    booksInProgressCount = booksInProgressCount,
+    metadata = metadata,
+    booksMetadata = booksMetadata,
+    deleted = deletedDate != null,
+    oneshot = oneshot,
+  )
 
   private fun SeriesMetadataRecord.toDto(
     genres: Set<String>,
@@ -428,51 +415,49 @@ class SeriesDtoDao(
     sharingLabels: Set<String>,
     links: List<WebLinkDto>,
     alternateTitles: List<AlternateTitleDto>,
-  ) =
-    SeriesMetadataDto(
-      status = status,
-      statusLock = statusLock,
-      created = createdDate,
-      lastModified = lastModifiedDate,
-      title = title,
-      titleLock = titleLock,
-      titleSort = titleSort,
-      titleSortLock = titleSortLock,
-      summary = summary,
-      summaryLock = summaryLock,
-      readingDirection = readingDirection ?: "",
-      readingDirectionLock = readingDirectionLock,
-      publisher = publisher,
-      publisherLock = publisherLock,
-      ageRating = ageRating,
-      ageRatingLock = ageRatingLock,
-      language = language,
-      languageLock = languageLock,
-      genres = genres,
-      genresLock = genresLock,
-      tags = tags,
-      tagsLock = tagsLock,
-      totalBookCount = totalBookCount,
-      totalBookCountLock = totalBookCountLock,
-      sharingLabels = sharingLabels,
-      sharingLabelsLock = sharingLabelsLock,
-      links = links,
-      linksLock = linksLock,
-      alternateTitles = alternateTitles,
-      alternateTitlesLock = alternateTitlesLock,
-    )
+  ) = SeriesMetadataDto(
+    status = status,
+    statusLock = statusLock,
+    created = createdDate,
+    lastModified = lastModifiedDate,
+    title = title,
+    titleLock = titleLock,
+    titleSort = titleSort,
+    titleSortLock = titleSortLock,
+    summary = summary,
+    summaryLock = summaryLock,
+    readingDirection = readingDirection ?: "",
+    readingDirectionLock = readingDirectionLock,
+    publisher = publisher,
+    publisherLock = publisherLock,
+    ageRating = ageRating,
+    ageRatingLock = ageRatingLock,
+    language = language,
+    languageLock = languageLock,
+    genres = genres,
+    genresLock = genresLock,
+    tags = tags,
+    tagsLock = tagsLock,
+    totalBookCount = totalBookCount,
+    totalBookCountLock = totalBookCountLock,
+    sharingLabels = sharingLabels,
+    sharingLabelsLock = sharingLabelsLock,
+    links = links,
+    linksLock = linksLock,
+    alternateTitles = alternateTitles,
+    alternateTitlesLock = alternateTitlesLock,
+  )
 
   private fun BookMetadataAggregationRecord.toDto(
     authors: List<AuthorDto>,
     tags: Set<String>,
-  ) =
-    BookMetadataAggregationDto(
-      authors = authors,
-      tags = tags,
-      releaseDate = releaseDate,
-      summary = summary,
-      summaryNumber = summaryNumber,
-      created = createdDate,
-      lastModified = lastModifiedDate,
-    )
+  ) = BookMetadataAggregationDto(
+    authors = authors,
+    tags = tags,
+    releaseDate = releaseDate,
+    summary = summary,
+    summaryNumber = summaryNumber,
+    created = createdDate,
+    lastModified = lastModifiedDate,
+  )
 }

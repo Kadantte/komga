@@ -2,12 +2,14 @@ package org.gotson.komga.infrastructure.jooq.main
 
 import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.persistence.LibraryRepository
+import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
 import org.gotson.komga.jooq.main.Tables
 import org.gotson.komga.jooq.main.tables.records.LibraryRecord
 import org.gotson.komga.language.toCurrentTimeZone
 import org.jooq.DSLContext
 import org.jooq.Record
 import org.jooq.ResultQuery
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.net.URL
@@ -16,8 +18,10 @@ import java.time.ZoneId
 
 @Component
 class LibraryDao(
-  private val dsl: DSLContext,
-) : LibraryRepository {
+  dslRW: DSLContext,
+  @Qualifier("dslContextRO") dslRO: DSLContext,
+) : SplitDslDaoBase(dslRW, dslRO),
+  LibraryRepository {
   private val l = Tables.LIBRARY
   private val ul = Tables.USER_LIBRARY_SHARING
   private val le = Tables.LIBRARY_EXCLUSIONS
@@ -33,46 +37,52 @@ class LibraryDao(
       .first()
 
   private fun findOne(libraryId: String) =
-    selectBase()
+    dslRO
+      .selectBase()
       .where(l.ID.eq(libraryId))
 
   override fun findAll(): Collection<Library> =
-    selectBase()
+    dslRO
+      .selectBase()
       .fetchAndMap()
 
   override fun findAllByIds(libraryIds: Collection<String>): Collection<Library> =
-    selectBase()
+    dslRO
+      .selectBase()
       .where(l.ID.`in`(libraryIds))
       .fetchAndMap()
 
-  private fun selectBase() =
-    dsl.select()
+  private fun DSLContext.selectBase() =
+    select()
       .from(l)
-      .leftJoin(le).onKey()
+      .leftJoin(le)
+      .onKey()
 
   private fun ResultQuery<Record>.fetchAndMap(): Collection<Library> =
-    this.fetchGroups({ it.into(l) }, { it.into(le) })
+    this
+      .fetchGroups({ it.into(l) }, { it.into(le) })
       .map { (lr, ler) ->
         lr.toDomain(ler.mapNotNull { it.exclusion }.toSet())
       }
 
   @Transactional
   override fun delete(libraryId: String) {
-    dsl.deleteFrom(le).where(le.LIBRARY_ID.eq(libraryId)).execute()
-    dsl.deleteFrom(ul).where(ul.LIBRARY_ID.eq(libraryId)).execute()
-    dsl.deleteFrom(l).where(l.ID.eq(libraryId)).execute()
+    dslRW.deleteFrom(le).where(le.LIBRARY_ID.eq(libraryId)).execute()
+    dslRW.deleteFrom(ul).where(ul.LIBRARY_ID.eq(libraryId)).execute()
+    dslRW.deleteFrom(l).where(l.ID.eq(libraryId)).execute()
   }
 
   @Transactional
   override fun deleteAll() {
-    dsl.deleteFrom(le).execute()
-    dsl.deleteFrom(ul).execute()
-    dsl.deleteFrom(l).execute()
+    dslRW.deleteFrom(le).execute()
+    dslRW.deleteFrom(ul).execute()
+    dslRW.deleteFrom(l).execute()
   }
 
   @Transactional
   override fun insert(library: Library) {
-    dsl.insertInto(l)
+    dslRW
+      .insertInto(l)
       .set(l.ID, library.id)
       .set(l.NAME, library.name)
       .set(l.ROOT, library.root.toString())
@@ -98,17 +108,19 @@ class LibraryDao(
       .set(l.SERIES_COVER, library.seriesCover.toString())
       .set(l.HASH_FILES, library.hashFiles)
       .set(l.HASH_PAGES, library.hashPages)
+      .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
       .execute()
 
-    insertDirectoryExclusions(library)
+    dslRW.insertDirectoryExclusions(library)
   }
 
   @Transactional
   override fun update(library: Library) {
-    dsl.update(l)
+    dslRW
+      .update(l)
       .set(l.NAME, library.name)
       .set(l.ROOT, library.root.toString())
       .set(l.IMPORT_COMICINFO_BOOK, library.importComicInfoBook)
@@ -133,6 +145,7 @@ class LibraryDao(
       .set(l.SERIES_COVER, library.seriesCover.toString())
       .set(l.HASH_FILES, library.hashFiles)
       .set(l.HASH_PAGES, library.hashPages)
+      .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
@@ -140,28 +153,24 @@ class LibraryDao(
       .where(l.ID.eq(library.id))
       .execute()
 
-    dsl.deleteFrom(le).where(le.LIBRARY_ID.eq(library.id)).execute()
-    insertDirectoryExclusions(library)
+    dslRW.deleteFrom(le).where(le.LIBRARY_ID.eq(library.id)).execute()
+    dslRW.insertDirectoryExclusions(library)
   }
 
-  override fun count(): Long = dsl.fetchCount(l).toLong()
+  override fun count(): Long = dslRO.fetchCount(l).toLong()
 
-  fun findDirectoryExclusions(libraryId: String): Set<String> =
-    dsl.select(le.EXCLUSION)
-      .from(le)
-      .where(le.LIBRARY_ID.eq(libraryId))
-      .fetchSet(le.EXCLUSION)
-
-  private fun insertDirectoryExclusions(library: Library) {
+  private fun DSLContext.insertDirectoryExclusions(library: Library) {
     if (library.scanDirectoryExclusions.isNotEmpty()) {
-      dsl.batch(
-        dsl.insertInto(le, le.LIBRARY_ID, le.EXCLUSION)
-          .values(null as String?, null),
-      ).also { step ->
-        library.scanDirectoryExclusions.forEach {
-          step.bind(library.id, it)
-        }
-      }.execute()
+      this
+        .batch(
+          this
+            .insertInto(le, le.LIBRARY_ID, le.EXCLUSION)
+            .values(null as String?, null),
+        ).also { step ->
+          library.scanDirectoryExclusions.forEach {
+            step.bind(library.id, it)
+          }
+        }.execute()
     }
   }
 
@@ -192,6 +201,7 @@ class LibraryDao(
       seriesCover = Library.SeriesCover.valueOf(seriesCover),
       hashFiles = hashFiles,
       hashPages = hashPages,
+      hashKoreader = hashKoreader,
       analyzeDimensions = analyzeDimensions,
       oneshotsDirectory = oneshotsDirectory,
       unavailableDate = unavailableDate,

@@ -1,18 +1,16 @@
 package org.gotson.komga.infrastructure.cache
 
 import com.github.benmanes.caffeine.cache.Caffeine
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.gotson.komga.domain.model.TransientBook
 import org.gotson.komga.domain.persistence.TransientBookRepository
 import org.springframework.stereotype.Service
 import java.util.concurrent.TimeUnit
 
-private val logger = KotlinLogging.logger {}
-
 @Service
 class TransientBookCache : TransientBookRepository {
   private val cache =
-    Caffeine.newBuilder()
+    Caffeine
+      .newBuilder()
       .expireAfterAccess(1, TimeUnit.HOURS)
       .build<String, TransientBook>()
 

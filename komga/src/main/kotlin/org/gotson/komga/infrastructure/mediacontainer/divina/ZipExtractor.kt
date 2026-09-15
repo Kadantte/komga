@@ -8,6 +8,8 @@ import org.gotson.komga.domain.model.MediaContainerEntry
 import org.gotson.komga.domain.model.MediaType
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.util.getZipEntryBytes
+import org.gotson.komga.infrastructure.util.use
 import org.springframework.stereotype.Service
 import java.nio.file.Path
 
@@ -26,8 +28,9 @@ class ZipExtractor(
     path: Path,
     analyzeDimensions: Boolean,
   ): List<MediaContainerEntry> =
-    ZipFile(path.toFile()).use { zip ->
-      zip.entries.toList()
+    ZipFile.builder().setPath(path).use { zip ->
+      zip.entries
+        .toList()
         .filter { !it.isDirectory }
         .map { entry ->
           try {
@@ -45,15 +48,11 @@ class ZipExtractor(
             logger.warn(e) { "Could not analyze entry: ${entry.name}" }
             MediaContainerEntry(name = entry.name, comment = e.message)
           }
-        }
-        .sortedWith(compareBy(natSortComparator) { it.name })
+        }.sortedWith(compareBy(natSortComparator) { it.name })
     }
 
   override fun getEntryStream(
     path: Path,
     entryName: String,
-  ): ByteArray =
-    ZipFile(path.toFile()).use { zip ->
-      zip.getInputStream(zip.getEntry(entryName)).use { it.readBytes() }
-    }
+  ): ByteArray = getZipEntryBytes(path, entryName)
 }

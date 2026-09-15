@@ -122,7 +122,7 @@
 
                 <!--  Sort Number  -->
                 <v-col cols="2">
-                  <v-text-field v-model="form[book.id].numberSort"
+                  <v-text-field v-model.number="form[book.id].numberSort"
                                 type="number"
                                 step="0.1"
                                 dense
@@ -200,7 +200,7 @@
 <script lang="ts">
 import Vue from 'vue'
 import {BookDto} from '@/types/komga-books'
-import IsbnVerify from '@saekitominaga/isbn-verify'
+import IsbnVerify from '@w0s/isbn-verify'
 import {isMatch} from 'date-fns'
 import {ERROR} from '@/types/events'
 
@@ -283,7 +283,7 @@ export default Vue.extend({
       return value || value === 0 ? true : this.$t('common.required').toString()
     },
     validateReleaseDate(date: string): string | boolean {
-      return date && !isMatch(date, 'yyyy-MM-dd') ? this.$t('dialog.edit_books.field_release_date_error').toString() : true
+      return date && (!isMatch(date, 'yyyy-MM-dd') || date.length !== 10) ? this.$t('dialog.edit_books.field_release_date_error').toString() : true
     },
     bookDisplayName(book: BookDto): string {
       const parts = book.url.split('/')

@@ -8,7 +8,7 @@
       "noResultsText": "Vastaavia tietueita ei löytynyt"
     },
     "dataTable": {
-      "itemsPerPageText": "Riviä/sivu:",
+      "itemsPerPageText": "Riviä sivua kohti:",
       "sortBy": "Lajittelu"
     },
     "fileInput": {
@@ -19,14 +19,23 @@
   },
   "account_settings": {
     "account_settings": "Tilin asetukset",
-    "change_password": "Vaihda salasana"
+    "api_key": {
+      "created_date": "Luomispäivä:{date}",
+      "force_kobo_sync": "Pakota Kobo synkronointi",
+      "generate_api_key": "Luo API-avain",
+      "no_keys": "API-avaimia ei ole vielä luotu"
+    },
+    "change_password": "Vaihda salasana",
+    "details": "Yksityiskohdat",
+    "my_account": "Tilini"
   },
   "announcements": {
-    "mark_all_read": "Merkitse kaikki luetuksi",
+    "mark_all_read": "Merkitse kaikki luetuiksi",
     "mark_read": "Merkitse luetuksi",
     "tab_title": "Tiedotteet"
   },
   "authentication_activity": {
+    "api_key": "API-avain",
     "datetime": "Päivämäärä & Aika",
     "email": "Sähköposti",
     "error": "Virhe",
@@ -86,6 +95,7 @@
     "beginning_of_book": "Olet kirjan alussa.",
     "changing_reading_direction": "Vaihda lukusuunta",
     "cycling_page_layout": "Vaihda sivun asettelua",
+    "cycling_page_margin": "Vaihda sivun marginaalia",
     "cycling_scale": "Vaihda skaalaa",
     "cycling_side_padding": "Vaihda sivuntäyttöä",
     "download_current_page": "Lataa nykyinen sivu",
@@ -128,6 +138,7 @@
       "general": "Yleiset",
       "gestures": "Eleet",
       "page_layout": "Sivun asettelu",
+      "page_margin": "Sivun marginaali",
       "paged": "Sivutetun lukijan asetukset",
       "reading_mode": "Lukutila",
       "scale_type": "Skaalauksen tyyppi",
@@ -138,6 +149,7 @@
     "shortcuts": {
       "close": "Sulje",
       "cycle_page_layout": "Vaihda sivun asettelua",
+      "cycle_page_margin": "Vaihda sivun marginaalia",
       "cycle_scale": "Vaihda skaalaa",
       "cycle_side_padding": "Vaihda sivuntäyttöä",
       "first_page": "Ensimmäinen sivu",
@@ -161,6 +173,8 @@
   },
   "browse_book": {
     "comment": "KOMMENTTI",
+    "date_created": "LUOTU",
+    "date_modified": "MUOKATTU VIIMEKSI",
     "download_file": "Lataa tiedosto",
     "file": "TIEDOSTO",
     "format": "MUOTO",
@@ -170,6 +184,8 @@
     "outdated_tooltip": "Tämä kirja täytyy uudelleenanalysoida, sillä sen tiedosto on muuttunut",
     "read_book": "Lue kirja",
     "read_incognito": "Lue incognito-tilassa",
+    "remove_from_collection": "Poista kirja kokoelmasta",
+    "remove_from_readlist": "Poista kirja luettujen listalta",
     "size": "KOKO"
   },
   "browse_collection": {
@@ -184,6 +200,7 @@
   },
   "browse_series": {
     "earliest_year_from_release_dates": "Tämä on aikaisin vuosi kaikista sarjassa olevien kirjojen julkaisuvuosista",
+    "remove_from_collection": "Poista sarja kokoelmasta",
     "series_no_summary": "Tällä sarjalla ei ole yhteenvetoa, joten valitsimme sinulle sellaisen!",
     "summary_from_book": "Kirjan {number} yhteenveto:"
   },
@@ -194,6 +211,8 @@
   "common": {
     "age": "Ikä",
     "all_libraries": "Kaikki kirjastot",
+    "all_of": "Kaikki",
+    "any_of": "Mikä tahansa",
     "book": "Kirja",
     "books": "Kirjat",
     "books_n": "Ei kirjaa | Yksi kirja | {count} kirjaa",
@@ -203,6 +222,7 @@
     "choose_image": "Valitse kuva",
     "close": "Sulje",
     "collections": "Kokoelmat",
+    "copied": "Kopioitu!",
     "create": "Luo",
     "delete": "Poista",
     "dimension": "l: {width}, k:{height}",
@@ -211,8 +231,10 @@
     "dismiss": "Hylkää",
     "download": "Lataa",
     "drag_drop": "vedä ja pudota",
+    "duplicate": "Kaksoiskappale",
     "email": "Sähköposti",
     "epub": "Epub",
+    "error": "Virhe",
     "filename": "Tiedostonimi",
     "filter_no_matches": "Aktiiviselle suodattimelle ei löytynyt tuloksia",
     "genre": "Tyylilaji",
@@ -220,12 +242,16 @@
     "go_to_library": "Siirry kirjastoon",
     "go_to_readlist": "Siirry lukulistaan",
     "go_to_series": "Siirry sarjaan",
+    "i_understand": "Ymmärrän",
     "library": "Kirjasto",
     "locale_name": "Suomi",
     "locale_rtl": "false",
     "lock_all": "Lukitse kaikki",
+    "media": "Media",
+    "more": "Lisää",
     "n_selected": "{count} valittu",
     "nothing_to_show": "Ei näytettävää",
+    "ok": "OK",
     "oneshot": "Kertajulkaisu",
     "outdated": "Vanhentunut",
     "page": "Sivu",
@@ -236,19 +262,23 @@
     "password": "Salasana",
     "pdf": "PDF",
     "pending_tasks": "Ei odottavia tehtäviä | 1 odottava tehtävä | {count} odottavaa tehtävää",
+    "pinned_libraries": "Kiinnitetyt kirjastot",
     "publisher": "Julkaisija",
     "read": "Lue",
     "read_on": "Luettu {date}",
     "readlist": "Lukulista",
     "readlists": "Lukulistat",
     "remember-me": "Muista minut",
+    "reorder": "Järjestä uudelleen",
     "required": "Pakollinen",
     "reset_filters": "Nollaa suodattimet",
     "roles": "Roolit",
     "save_changes": "Tallenna muutokset",
     "series": "Sarja | Sarjat",
+    "settings": "Asetukset",
     "sidecars": "Sivuvaunut",
     "tags": "Tunnisteet",
+    "ui": "Käyttöliittymä",
     "unavailable": "Ei käytettävissä",
     "unlock_all": "Avaa kaikki",
     "url": "URL",
@@ -272,6 +302,7 @@
     "comicrack_preambule_html": "Voit tuoda valmiita ComicRack -lukulistoja <code>.cbl</code> -formaatissa.<br>Komga yrittää sovittaa annetun sarjan ja kirjan numeron kirjastossasi oleviin sarjoihin ja kirjoihin.",
     "dialog_confirmation": {
       "body": "{unmatched} / {total} kirjoista ei ole sovitettu",
+      "body2": "{duplicates} / {total} kirjaa on kaksoiskappaleita",
       "create": "Luo silti",
       "title": "Joitakin kirjoja ei ole sovitettu"
     },
@@ -287,6 +318,14 @@
     "tab_title": "Tietojen tuonti"
   },
   "dialog": {
+    "add_api_key": {
+      "button_confirm": "Luo",
+      "context": "API-avaimia voidaan käyttää todentamiseen Kobo Sync-protokollan kautta.",
+      "dialog_title": "Luo uusi API-avain",
+      "field_comment": "Kommentti",
+      "field_comment_hint": "Mihin API-avainta käytetään?",
+      "info_copy": "Ole huolellinen, että kopioit API-avainmesi nyt. Et voi enää nähdä sitä uudestaan!"
+    },
     "add_to_collection": {
       "button_create": "Luo",
       "card_collection_subtitle": "Ei sarjaa | Yksi sarja | {count} sarjaa",
@@ -309,11 +348,7 @@
       "dialog_title": "Lisää käyttäjä",
       "field_email": "Sähköposti",
       "field_email_error": "Täytyy olla toimiva sähköpostiosoite",
-      "field_password": "Salasana",
-      "field_role_administrator": "Järjestelmänvalvoja",
-      "field_role_file_download": "Tiedostojen lataus",
-      "field_role_page_streaming": "Sivujen suoratoisto",
-      "label_roles": "Roolit"
+      "field_password": "Salasana"
     },
     "analyze_library": {
       "body": "Analysoi kaikki kirjaston mediatiedostot. Analyysi kerää tietoa mediasta. Kirjaston koosta riippuen tämä voi kestää kauan.",
@@ -323,6 +358,12 @@
     "book_picker": {
       "filter": "Suodata kirjan numeron, nimen tai julkaisupäivän mukaan",
       "title": "Valitse kirja"
+    },
+    "delete_apikey": {
+      "button_confirm": "Poista",
+      "confirm_delete": "Ymmärrän, poista API-avain \"{name}\"",
+      "dialog_title": "Poista API-avain",
+      "warning_html": "Minkään ohjelma tai skripti, jotka käyttävät tätä API-avainta, ei enää pääse käyttämään Komgan API-rajapintaa. Tätä toimintoa ei voi perua."
     },
     "delete_book": {
       "button_confirm": "Poista",
@@ -422,6 +463,7 @@
       "dialot_title_edit": "Muokkaa kirjastoa",
       "field_analysis_analyze_dimensions": "Analysoi sivujen mitat",
       "field_analysis_hash_files": "Laske tiedostojen tarkisteet",
+      "field_analysis_hash_koreader": "Laske tiivisteet tiedostoille KOReaderia varten",
       "field_analysis_hash_pages": "Laske sivujen tarkisteet",
       "field_convert_to_cbz": "Muunna CBZ-muotoon automaattisesti",
       "field_import_barcode_isbn": "ISBN-viivakoodi",
@@ -474,6 +516,11 @@
       "tab_general": "Yleiset",
       "tab_poster": "Juliste"
     },
+    "edit_recommended": {
+      "button_confirm": "Tallenna muutokset",
+      "button_reset": "Palauta oletukset",
+      "dialog_title": "Muokkaa ehdotettujen näkymää"
+    },
     "edit_series": {
       "button_cancel": "Peruuta",
       "button_confirm": "Tallenna muutokset",
@@ -511,13 +558,13 @@
     "edit_user_restrictions": {
       "age_restriction": {
         "allow_under": "Salli vain alle",
-        "exclude_over": "Älä sisällytä yli",
+        "exclude_over": "Älä salli yli",
         "none": "Ei rajoituksia"
       },
       "edit_restrictions_for": "Muokkaa käyttäjän {name} rajoituksia",
       "label_age_restriction": "Ikärajoitus",
-      "label_allow_only_labels": "Salli vain tunnisteet",
-      "label_exclude_labels": "Älä sisällytä tunnisteita",
+      "label_allow_only_labels": "Vain sallitut tunnisteet",
+      "label_exclude_labels": "Kielletyt tunnisteet",
       "tab_content_restrictions": "Sisältörajoitukset",
       "tab_shared_libraries": "Jaetut kirjastot"
     },
@@ -541,6 +588,10 @@
         "order": "Järjestys"
       },
       "title": "Kohdetiedoston nimi"
+    },
+    "force_kobo_sync": {
+      "dialog_title": "Pakota Kobo synkronointi",
+      "warning_html": "Tämä poistaa tämän API-avaimen synkronointihistorian kokonaan. Kobosi synkronoi kaiken seuraavalla kerralla."
     },
     "password_change": {
       "button_cancel": "Peruuta",
@@ -609,8 +660,11 @@
     "delete_to_save": "Poista säästääksesi {size}",
     "deleted_count": "Poistettu {count} kertaa",
     "empty_title": "Sivujen kaksoiskappaleita ei löytynyt",
+    "empty_title_known": "Ei havaittuja kaksoiskappaleita",
     "filter": {
       "count": "Määrä",
+      "date_added": "Lisäyspäivämäärä",
+      "date_modified": "Muokkauspäivämäärä",
       "delete_count": "Poistojen määrä",
       "delete_size": "Tilaa säästetty",
       "match_count": "Osumien määrä",
@@ -660,6 +714,11 @@
       "DuplicatePageDeleted": "Sivun kaksoiskappale poistettu",
       "SeriesFolderDeleted": "Sarjan kansio poistettu"
     },
+    "media_profile": {
+      "DIVINA": "DIVINA",
+      "EPUB": "EPUB",
+      "PDF": "PDF"
+    },
     "media_status": {
       "ERROR": "Virhe",
       "OUTDATED": "Vanhentunut",
@@ -708,8 +767,10 @@
   "epubreader": {
     "current_chapter": "Nykyinen luku",
     "page_of": "Sivu {page}/{count}",
+    "publisher_font": "Julkaisija",
     "settings": {
       "column_count": "Sarakkeiden määrä",
+      "font_family": "Fontti",
       "layout": "Asettelu",
       "layout_paginated": "Sivutettu",
       "layout_scroll": "Rullaa",
@@ -752,7 +813,7 @@
     "ERR_1017": "Ei voida skannata kansiota, joka on osa jo olemassa olevaa kirjastoa",
     "ERR_1018": "Tiedostoa ei löydy",
     "ERR_1019": "Ei voida tuoda tiedostoa joka on osa jo olemassa olevaa kirjastoa",
-    "ERR_1020": "Päivityksen kohdekirja ei ole osa annettua sarjaa",
+    "ERR_1020": "Päivityksen kohdekirja ei kuulu annettuun sarjaan",
     "ERR_1021": "Kohdetiedosto on jo olemassa",
     "ERR_1022": "Äskettäin tuotua kirjaa ei voitu skannata",
     "ERR_1023": "Kirja on jo lukulistalla",
@@ -765,16 +826,25 @@
     "ERR_1030": "ComicRack CBL ei sisällä Nimi elementtiä",
     "ERR_1031": "ComicRack CBL Kirjasta puuttuu sarja tai numero",
     "ERR_1032": "EPUB-tiedostossa on väärä mediatyyppi",
-    "ERR_1033": "Jotkin merkinnät puuttuvat"
+    "ERR_1033": "Jotkin merkinnät puuttuvat",
+    "ERR_1034": "API-avain samalla kommentilla on jo olemassa",
+    "ERR_1035": "Virhe hakiessa EPUBin sisällysluetteloa",
+    "ERR_1036": "Virhe hakiessa EPUBin merkkipaikkoja",
+    "ERR_1037": "Virhe hakiessa EPUBin sivulistaa",
+    "ERR_1038": "Virhe hakiessa EPUBin divina sivuja",
+    "ERR_1039": "Virhe hakiessa EPUBin sijainteja"
   },
   "filter": {
     "age_rating": "ikäluokitus",
     "age_rating_none": "Ei mitään",
+    "any": "Mikä tahansa",
     "complete": "Valmis",
     "genre": "tyylilaji",
     "in_progress": "Meneillään",
     "language": "kieli",
     "library": "kirjasto",
+    "media_profile": "Mediaprofiili",
+    "media_status": "Median tila",
     "oneshot": "Kertajulkaisu",
     "publisher": "julkaisija",
     "read": "Luettu",
@@ -804,6 +874,8 @@
   },
   "library_navigation": {
     "browse": "Selaa",
+    "browse_books": "Kirjat",
+    "browse_series": "Sarjat",
     "collections": "Kokoelmat",
     "readlists": "Lukulistat",
     "recommended": "Suositeltu"
@@ -822,16 +894,13 @@
     "status": "Tila",
     "url": "URL"
   },
-  "media_management": {
-    "title": "Median hallinta"
-  },
   "menu": {
     "add_to_collection": "Lisää kokoelmaan",
     "add_to_readlist": "Lisää lukulistaan",
     "analyze": "Analysoi",
     "bulk_edit_metadata": "Metatietojen joukkomuokkaus",
     "delete": "Poista",
-    "deselect_all": "Poista kaikkien valinta",
+    "deselect_all": "Poista valinta",
     "download_readlist": "Lataa lukulista",
     "download_series": "Lataa sarja",
     "edit": "Muokkaa",
@@ -839,10 +908,12 @@
     "empty_trash": "Tyhjennä roskakori",
     "mark_read": "Merkitse luetuksi",
     "mark_unread": "Merkitse lukemattomaksi",
+    "pin": "Kiinnitys",
     "refresh_metadata": "Päivitä metatiedot",
     "scan_library_files": "Skannaa kirjastotiedostot",
     "scan_library_files_deep": "Skannaa kirjastotiedostot (syvä)",
-    "select_all": "Valitse kaikki"
+    "select_all": "Valitse kaikki",
+    "unpin": "Poista kiinnitys"
   },
   "metrics": {
     "library_books": "Kirjaa kirjastoa kohden",
@@ -853,10 +924,18 @@
     "tasks_total_time": "Tehtävien kokonaisaika",
     "title": "Metriikat"
   },
+  "missing_posters": {
+    "title": "Puuttuvia julisteita"
+  },
   "navigation": {
     "home": "Koti",
     "libraries": "Kirjastot",
-    "logout": "Kirjaudu ulos"
+    "logout": "Kirjaudu ulos",
+    "try_new_ui": "Kokeile uutta käyttöliittymää"
+  },
+  "no_libraries_pinned": {
+    "subtitle": "Voit kiinnittää kirjaston kolmen palluran valikosta",
+    "title": "Ei kiinnitettyjä kirjastoja"
   },
   "page_not_found": {
     "go_back_to_home_page": "Palaa takaisin etusivulle",
@@ -895,10 +974,12 @@
       "button_scan_libraries": "Skannaa kaikki kirjastot",
       "button_scan_libraries_deep": "Skannaa kaikki kirjastot (syvä)",
       "button_shutdown": "Sammuta",
+      "download_log": "Lataa lokitiedosto",
       "notification_tasks_cancelled": "Ei peruutettavia tehtäviä | Yksi tehtävä peruutettu | {count} tehtävää peruutettu",
       "section_title": "Palvelimen hallinta"
     },
-    "tab_title": "Palvelin"
+    "tab_title": "Palvelin",
+    "updates": "Päivitykset"
   },
   "server_settings": {
     "config_precedence": "Ensisijainen asetustiedostoon nähden",
@@ -909,8 +990,12 @@
       "btn_confirm": "Kyllä, mutta vain jos suurempi",
       "title": "Luo pikkukuvat uudestaan"
     },
+    "hint_kobo_port": "Aseta vain, jos kansien ja latausten synkronoinnissa on ongelmia",
     "label_delete_empty_collections": "Poista tyhjät kokoelmat skannauksen jälkeen",
-    "label_delete_empty_readlists": "Poista tyhjät luettujen listat skannauksen jälkeen",
+    "label_delete_empty_readlists": "Poista tyhjät lukulistat skannauksen jälkeen",
+    "label_kepubify_path": "Kepubifyn polku",
+    "label_kobo_port": "Kobo Syncin ulkoinen portti",
+    "label_kobo_proxy": "Lähetä Kobo Syncin pyynnöt välityspalvelimen yli Kobo Storeen",
     "label_rememberme_duration": "Muista minut ajan pituus (päivää)",
     "label_server_context_path": "Perusosoite",
     "label_server_port": "Palvelimen portti",
@@ -931,13 +1016,17 @@
   "sort": {
     "books_count": "Kirjojen määrä",
     "date_added": "Lisäyspäivämäärä",
+    "date_read": "Lukupäivä",
     "date_updated": "Päivityspäivämäärä",
     "file_name": "Tiedostonimi",
     "file_size": "Tiedoston koko",
     "folder_name": "Kansion nimi",
     "name": "Nimi",
     "number": "Numero",
-    "release_date": "Julkaisupäivämäärä"
+    "page_count": "Sivumäärä",
+    "random": "Satunnainen",
+    "release_date": "Julkaisupäivämäärä",
+    "series": "Sarjat"
   },
   "theme": {
     "dark": "Tumma",
@@ -959,20 +1048,41 @@
     "less": "Vähemmän nimiä",
     "more": "Enemmän nimiä"
   },
+  "ui_settings": {
+    "general": "Yleiset",
+    "label_oauth2_auto_login": "Automaattinen OAuth2-kirjautuminen",
+    "label_oauth2_hide_login": "Piilota kirjautumisvalikot jos OAuth2 on päällä",
+    "label_poster_blur_unread": "Sumenna lukemattomien kirjojen ja sarjojen juliste",
+    "label_poster_stretch": "Venytä juliste kortin kokoon",
+    "label_series_groups": "Sarjojen ryhmitys",
+    "section_oauth2": "OAuth2",
+    "series_groups": {
+      "alpha": "Aakkosjärjestys",
+      "japanese": "Gojūon (japani)"
+    },
+    "tooltip_oauth2_auto_login": "Vaatii yhden OAuth2 tarjoajan ja 'piilota kirjautumisvalikot' pitää olla päällä"
+  },
+  "updates": {
+    "available": "Päivityksiä on saatavilla",
+    "latest_installed": "Uusin Komgan versio on jo asennettu"
+  },
   "user_roles": {
     "ADMIN": "Järjestelmänvalvoja",
     "FILE_DOWNLOAD": "Tiedostojen lataus",
-    "PAGE_STREAMING": "Suoratoista sivuja",
+    "KOBO_SYNC": "Kobo synkronointi",
+    "KOREADER_SYNC": "KOReaderin synkronointi",
+    "PAGE_STREAMING": "Sivujen suoratoisto",
     "USER": "Käyttäjä"
   },
   "users": {
+    "api_keys": "API-avaimet",
     "authentication_activity": "Todentamisaktiviteetti",
     "users": "Käyttäjät"
   },
   "validation": {
     "context_path": "Täytyy alkaa '/', ei voi päättyä '/-_' ja voi sisältää vain '/-_a-z0-9'",
     "one_or_more": "Pitää olla vähintään yksi",
-    "tcp_port": "Pitää olla väliltä 1 ja 65535",
+    "tcp_port": "Pitää olla 1 ja 65535 väliltä",
     "zero_or_more": "On oltava vähintään 0"
   },
   "welcome": {

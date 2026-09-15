@@ -3,7 +3,6 @@ package org.gotson.komga.interfaces.api.rest
 import com.ninjasquad.springmockk.SpykBean
 import io.mockk.every
 import io.mockk.verify
-import org.gotson.komga.domain.model.ROLE_ADMIN
 import org.gotson.komga.interfaces.api.rest.dto.JsonFeedDto
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -44,7 +43,7 @@ class AnnouncementControllerTest(
             LocalDate.of(2023, 3, 21).atStartOfDay(),
             ZoneOffset.UTC,
           ),
-          JsonFeedDto.AuthorDto("gotson", "https://github.com/gotson"),
+          JsonFeedDto.ItemAuthorDto("gotson", "https://github.com/gotson"),
           setOf(
             "breaking change",
             "upgrade",
@@ -56,12 +55,13 @@ class AnnouncementControllerTest(
     )
 
   @Test
-  @WithMockCustomUser(roles = [ROLE_ADMIN])
+  @WithMockCustomUser(roles = ["ADMIN"])
   fun `when getting announcements multiple times then the server announcements are only fetched once`() {
     every { announcementController.fetchWebsiteAnnouncements() } returns mockFeed
 
     repeat(2) {
-      mockMvc.get("/api/v1/announcements")
+      mockMvc
+        .get("/api/v1/announcements")
         .andExpect {
           status { isOk() }
           jsonPath("$.items.length()") { value(1) }

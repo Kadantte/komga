@@ -430,14 +430,15 @@ import {authorRoles} from '@/types/author-roles'
 import Vue from 'vue'
 import {helpers, requiredIf} from 'vuelidate/lib/validators'
 import {BookDto, BookThumbnailDto} from '@/types/komga-books'
-import IsbnVerify from '@saekitominaga/isbn-verify'
+import IsbnVerify from '@w0s/isbn-verify'
 import {isMatch} from 'date-fns'
 import {debounce} from 'lodash'
 import {ERROR, ErrorEvent} from '@/types/events'
 import DropZone from '@/components/DropZone.vue'
 import ThumbnailCard from '@/components/ThumbnailCard.vue'
+import {NameValue} from '@/types/filter'
 
-const validDate = (value: string) => !helpers.req(value) || isMatch(value, 'yyyy-MM-dd')
+const validDate = (value: string) => !helpers.req(value) || isMatch(value, 'yyyy-MM-dd') && value.length == 10
 const validIsbn = (value: string) => !helpers.req(value) || new IsbnVerify(value).isIsbn13({check_digit: true})
 
 export default Vue.extend({

@@ -1,6 +1,6 @@
 package org.gotson.komga.interfaces.api.rest
 
-import io.github.oshai.kotlinlogging.KotlinLogging
+import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
@@ -10,11 +10,13 @@ import org.gotson.komga.domain.model.Author
 import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.domain.model.DomainEvent
 import org.gotson.komga.domain.model.DuplicateNameException
-import org.gotson.komga.domain.model.ROLE_ADMIN
 import org.gotson.komga.domain.model.ReadStatus
+import org.gotson.komga.domain.model.SearchCondition
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.model.SeriesCollection
 import org.gotson.komga.domain.model.SeriesMetadata
-import org.gotson.komga.domain.model.SeriesSearchWithReadProgress
+import org.gotson.komga.domain.model.SeriesSearch
 import org.gotson.komga.domain.model.ThumbnailSeriesCollection
 import org.gotson.komga.domain.persistence.SeriesCollectionRepository
 import org.gotson.komga.domain.persistence.ThumbnailSeriesCollectionRepository
@@ -22,9 +24,10 @@ import org.gotson.komga.domain.service.SeriesCollectionLifecycle
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.openapi.AuthorsAsQueryParam
+import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
+import org.gotson.komga.infrastructure.openapi.PageableWithoutSortAsQueryParam
 import org.gotson.komga.infrastructure.security.KomgaPrincipal
-import org.gotson.komga.infrastructure.swagger.AuthorsAsQueryParam
-import org.gotson.komga.infrastructure.swagger.PageableWithoutSortAsQueryParam
 import org.gotson.komga.infrastructure.web.Authors
 import org.gotson.komga.interfaces.api.persistence.SeriesDtoRepository
 import org.gotson.komga.interfaces.api.rest.dto.CollectionCreationDto
@@ -58,9 +61,9 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.multipart.MultipartFile
 import org.springframework.web.server.ResponseStatusException
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
-
-private val logger = KotlinLogging.logger {}
 
 @RestController
 @RequestMapping("api/v1/collections", produces = [MediaType.APPLICATION_JSON_VALUE])
@@ -73,9 +76,10 @@ class SeriesCollectionController(
   private val thumbnailSeriesCollectionRepository: ThumbnailSeriesCollectionRepository,
   private val eventPublisher: ApplicationEventPublisher,
 ) {
+  @Operation(summary = "List collections", tags = [OpenApiConfiguration.TagNames.COLLECTIONS])
   @PageableWithoutSortAsQueryParam
   @GetMapping
-  fun getAll(
+  fun getCollections(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "search", required = false) searchTerm: String?,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>?,
@@ -98,19 +102,23 @@ class SeriesCollectionController(
           sort,
         )
 
-    return collectionRepository.findAll(principal.user.getAuthorizedLibraryIds(libraryIds), principal.user.getAuthorizedLibraryIds(null), searchTerm, pageRequest, principal.user.restrictions)
+    return collectionRepository
+      .findAll(principal.user.getAuthorizedLibraryIds(libraryIds), principal.user.getAuthorizedLibraryIds(null), searchTerm, pageRequest, principal.user.restrictions)
       .map { it.toDto() }
   }
 
+  @Operation(summary = "Get collection details", tags = [OpenApiConfiguration.TagNames.COLLECTIONS])
   @GetMapping("{id}")
-  fun getOne(
+  fun getCollectionById(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable id: String,
   ): CollectionDto =
-    collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)
+    collectionRepository
+      .findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)
       ?.toDto()
       ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
+  @Operation(summary = "Get collection's poster image", tags = [OpenApiConfiguration.TagNames.COLLECTION_POSTER])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])
   @GetMapping(value = ["{id}/thumbnail"], produces = [MediaType.IMAGE_JPEG_VALUE])
   fun getCollectionThumbnail(
@@ -118,12 +126,14 @@ class SeriesCollectionController(
     @PathVariable id: String,
   ): ResponseEntity<ByteArray> {
     collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
-      return ResponseEntity.ok()
+      return ResponseEntity
+        .ok()
         .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS).cachePrivate())
         .body(collectionLifecycle.getThumbnailBytes(it, principal.user.id))
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Get collection poster image", tags = [OpenApiConfiguration.TagNames.COLLECTION_POSTER])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])
   @GetMapping(value = ["{id}/thumbnails/{thumbnailId}"], produces = [MediaType.IMAGE_JPEG_VALUE])
   fun getCollectionThumbnailById(
@@ -131,12 +141,15 @@ class SeriesCollectionController(
     @PathVariable(name = "id") id: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ): ByteArray {
-    collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
-      return collectionLifecycle.getThumbnailBytes(thumbnailId)
-        ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let { collection ->
+      thumbnailSeriesCollectionRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.collectionId != collection.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        return poster.thumbnail
+      } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "List collection's posters", tags = [OpenApiConfiguration.TagNames.COLLECTION_POSTER])
   @GetMapping(value = ["{id}/thumbnails"], produces = [MediaType.APPLICATION_JSON_VALUE])
   fun getCollectionThumbnails(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -147,8 +160,9 @@ class SeriesCollectionController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Add collection poster", tags = [OpenApiConfiguration.TagNames.COLLECTION_POSTER])
   @PostMapping(value = ["{id}/thumbnails"], consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   fun addUserUploadedCollectionThumbnail(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id") id: String,
@@ -161,73 +175,81 @@ class SeriesCollectionController(
       if (!contentDetector.isImage(mediaType))
         throw ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
 
-      return collectionLifecycle.addThumbnail(
-        ThumbnailSeriesCollection(
-          collectionId = collection.id,
-          thumbnail = file.bytes,
-          type = ThumbnailSeriesCollection.Type.USER_UPLOADED,
-          selected = selected,
-          fileSize = file.bytes.size.toLong(),
-          mediaType = mediaType,
-          dimension = imageAnalyzer.getDimension(file.inputStream.buffered()) ?: Dimension(0, 0),
-        ),
-      ).toDto()
+      return collectionLifecycle
+        .addThumbnail(
+          ThumbnailSeriesCollection(
+            collectionId = collection.id,
+            thumbnail = file.bytes,
+            type = ThumbnailSeriesCollection.Type.USER_UPLOADED,
+            selected = selected,
+            fileSize = file.bytes.size.toLong(),
+            mediaType = mediaType,
+            dimension = imageAnalyzer.getDimension(file.inputStream.buffered()) ?: Dimension(0, 0),
+          ),
+        ).toDto()
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Mark collection poster as selected", tags = [OpenApiConfiguration.TagNames.COLLECTION_POSTER])
   @PutMapping("{id}/thumbnails/{thumbnailId}/selected")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  fun markSelectedCollectionThumbnail(
+  fun markCollectionThumbnailSelected(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id") id: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ) {
-    collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let {
-      thumbnailSeriesCollectionRepository.findByIdOrNull(thumbnailId)?.let {
-        collectionLifecycle.markSelectedThumbnail(it)
-        eventPublisher.publishEvent(DomainEvent.ThumbnailSeriesCollectionAdded(it.copy(selected = true)))
+    collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let { collection ->
+      thumbnailSeriesCollectionRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.collectionId != collection.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        collectionLifecycle.markSelectedThumbnail(poster)
+        eventPublisher.publishEvent(DomainEvent.ThumbnailSeriesCollectionAdded(poster.copy(selected = true)))
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Delete collection poster", tags = [OpenApiConfiguration.TagNames.COLLECTION_POSTER])
   @DeleteMapping("{id}/thumbnails/{thumbnailId}")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
   fun deleteUserUploadedCollectionThumbnail(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id") id: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ) {
-    collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let {
-      thumbnailSeriesCollectionRepository.findByIdOrNull(thumbnailId)?.let {
-        collectionLifecycle.deleteThumbnail(it)
+    collectionRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let { collection ->
+      thumbnailSeriesCollectionRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.collectionId != collection.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        collectionLifecycle.deleteThumbnail(poster)
       } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Create collection", tags = [OpenApiConfiguration.TagNames.COLLECTIONS])
   @PostMapping
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
-  fun addOne(
+  @PreAuthorize("hasRole('ADMIN')")
+  fun createCollection(
     @Valid @RequestBody
     collection: CollectionCreationDto,
   ): CollectionDto =
     try {
-      collectionLifecycle.addCollection(
-        SeriesCollection(
-          name = collection.name,
-          ordered = collection.ordered,
-          seriesIds = collection.seriesIds,
-        ),
-      ).toDto()
+      collectionLifecycle
+        .addCollection(
+          SeriesCollection(
+            name = collection.name,
+            ordered = collection.ordered,
+            seriesIds = collection.seriesIds,
+          ),
+        ).toDto()
     } catch (e: DuplicateNameException) {
       throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
     }
 
+  @Operation(summary = "Update collection", tags = [OpenApiConfiguration.TagNames.COLLECTIONS])
   @PatchMapping("{id}")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun updateOne(
+  fun updateCollectionById(
     @PathVariable id: String,
     @Valid @RequestBody
     collection: CollectionUpdateDto,
@@ -247,10 +269,11 @@ class SeriesCollectionController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Delete collection", tags = [OpenApiConfiguration.TagNames.COLLECTIONS])
   @DeleteMapping("{id}")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun deleteOne(
+  fun deleteCollectionById(
     @PathVariable id: String,
   ) {
     collectionRepository.findByIdOrNull(id)?.let {
@@ -258,10 +281,11 @@ class SeriesCollectionController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "List collection's series", tags = [OpenApiConfiguration.TagNames.COLLECTION_SERIES])
   @PageableWithoutSortAsQueryParam
   @AuthorsAsQueryParam
   @GetMapping("{id}/series")
-  fun getSeriesForCollection(
+  fun getSeriesByCollectionId(
     @PathVariable id: String,
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>?,
@@ -272,7 +296,7 @@ class SeriesCollectionController(
     @RequestParam(name = "genre", required = false) genres: List<String>?,
     @RequestParam(name = "tag", required = false) tags: List<String>?,
     @RequestParam(name = "age_rating", required = false) ageRatings: List<String>?,
-    @RequestParam(name = "release_years", required = false) releaseYears: List<String>?,
+    @RequestParam(name = "release_year", required = false) releaseYears: List<String>?,
     @RequestParam(name = "deleted", required = false) deleted: Boolean?,
     @RequestParam(name = "complete", required = false) complete: Boolean?,
     @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
@@ -296,23 +320,39 @@ class SeriesCollectionController(
             sort,
           )
 
-      val seriesSearch =
-        SeriesSearchWithReadProgress(
-          libraryIds = principal.user.getAuthorizedLibraryIds(libraryIds),
-          metadataStatus = metadataStatus,
-          publishers = publishers,
-          deleted = deleted,
-          complete = complete,
-          languages = languages,
-          genres = genres,
-          tags = tags,
-          ageRatings = ageRatings?.map { it.toIntOrNull() },
-          releaseYears = releaseYears,
-          readStatus = readStatus,
-          authors = authors,
+      val search =
+        SeriesSearch(
+          SearchCondition.AllOfSeries(
+            buildList {
+              add(SearchCondition.CollectionId(SearchOperator.Is(collection.id)))
+              if (!libraryIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(libraryIds.map { SearchCondition.LibraryId(SearchOperator.Is(it)) }))
+              deleted?.let { add(SearchCondition.Deleted(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              complete?.let { add(SearchCondition.Complete(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              if (!metadataStatus.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(metadataStatus.map { SearchCondition.SeriesStatus(SearchOperator.Is(it)) }))
+              if (!publishers.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(publishers.map { SearchCondition.Publisher(SearchOperator.Is(it)) }))
+              if (!languages.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(languages.map { SearchCondition.Language(SearchOperator.Is(it)) }))
+              if (!tags.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(tags.map { SearchCondition.Tag(SearchOperator.Is(it)) }))
+              if (!genres.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(genres.map { SearchCondition.Genre(SearchOperator.Is(it)) }))
+              if (!ageRatings.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(ageRatings.map { it.toIntOrNull()?.let { ageRating -> SearchCondition.AgeRating(SearchOperator.Is(ageRating)) } ?: SearchCondition.AgeRating(SearchOperator.IsNullT()) }))
+              if (!releaseYears.isNullOrEmpty())
+                add(
+                  SearchCondition.AnyOfSeries(
+                    releaseYears.mapNotNull { it.toIntOrNull() }.map { releaseYear ->
+                      SearchCondition.AllOfSeries(
+                        SearchCondition.ReleaseDate(SearchOperator.After(ZonedDateTime.of(releaseYear - 1, 12, 31, 12, 0, 0, 0, ZoneOffset.UTC))),
+                        SearchCondition.ReleaseDate(SearchOperator.Before(ZonedDateTime.of(releaseYear + 1, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC))),
+                      )
+                    },
+                  ),
+                )
+              if (!readStatus.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(readStatus.map { SearchCondition.ReadStatus(SearchOperator.Is(it)) }))
+              if (!authors.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(authors.map { SearchCondition.Author(SearchOperator.Is(SearchCondition.AuthorMatch(it.name, it.role))) }))
+            },
+          ),
         )
 
-      seriesDtoRepository.findAllByCollectionId(collection.id, seriesSearch, principal.user.id, pageRequest, principal.user.restrictions)
-        .map { it.restrictUrl(!principal.user.roleAdmin) }
+      seriesDtoRepository
+        .findAll(search, SearchContext(principal.user), pageRequest)
+        .map { it.restrictUrl(!principal.user.isAdmin) }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 }

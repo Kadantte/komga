@@ -9,8 +9,11 @@ import org.gotson.komga.domain.model.Author
 import org.gotson.komga.domain.model.KomgaUser
 import org.gotson.komga.domain.model.ReadProgress
 import org.gotson.komga.domain.model.ReadStatus
+import org.gotson.komga.domain.model.SearchCondition
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.model.SeriesMetadata
-import org.gotson.komga.domain.model.SeriesSearchWithReadProgress
+import org.gotson.komga.domain.model.SeriesSearch
 import org.gotson.komga.domain.model.makeBook
 import org.gotson.komga.domain.model.makeLibrary
 import org.gotson.komga.domain.model.makeSeries
@@ -58,7 +61,7 @@ class SeriesDtoDaoTest(
   @Autowired private val searchIndexLifecycle: SearchIndexLifecycle,
 ) {
   private val library = makeLibrary()
-  private val user = KomgaUser("user@example.org", "", false)
+  private val user = KomgaUser("user@example.org", "")
 
   @MockkBean
   private lateinit var mockEventPublisher: ApplicationEventPublisher
@@ -93,7 +96,8 @@ class SeriesDtoDaoTest(
   }
 
   private fun setupSeries() {
-    (1..4).map { makeSeries("$it", library.id) }
+    (1..4)
+      .map { makeSeries("$it", library.id) }
       .forEach { series ->
         val created = seriesLifecycle.createSeries(series)
         seriesLifecycle.addBooks(
@@ -124,6 +128,31 @@ class SeriesDtoDaoTest(
   }
 
   @Nested
+  inner class SortCriteria {
+    @Test
+    fun `given series when sorting by title sort then results are ordered`() {
+      // given
+      seriesLifecycle.createSeries(makeSeries("Éb", library.id))
+      seriesLifecycle.createSeries(makeSeries("Ea", library.id))
+      seriesLifecycle.createSeries(makeSeries("Ec", library.id))
+
+      searchIndexLifecycle.rebuildIndex()
+
+      // when
+      val found =
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("metadata.titleSort")),
+          ).content
+
+      // then
+      assertThat(found.map { it.metadata.title }).containsExactly("Ea", "Éb", "Ec")
+    }
+  }
+
+  @Nested
   inner class ReadProgress {
     @Test
     fun `given series in various read status when searching for read series then only read series are returned`() {
@@ -132,11 +161,12 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(readStatus = listOf(ReadStatus.READ)),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.READ))),
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(1)
@@ -152,11 +182,12 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(readStatus = listOf(ReadStatus.UNREAD)),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.UNREAD))),
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(1)
@@ -172,11 +203,12 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(readStatus = listOf(ReadStatus.IN_PROGRESS)),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.IN_PROGRESS))),
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(2)
@@ -195,11 +227,17 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(readStatus = listOf(ReadStatus.READ, ReadStatus.UNREAD)),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(
+              SearchCondition.AnyOfSeries(
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.READ)),
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.UNREAD)),
+              ),
+            ),
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(2)
@@ -213,11 +251,17 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(readStatus = listOf(ReadStatus.READ, ReadStatus.IN_PROGRESS)),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(
+              SearchCondition.AnyOfSeries(
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.READ)),
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.IN_PROGRESS)),
+              ),
+            ),
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(3)
@@ -231,11 +275,17 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(readStatus = listOf(ReadStatus.UNREAD, ReadStatus.IN_PROGRESS)),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(
+              SearchCondition.AnyOfSeries(
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.UNREAD)),
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.IN_PROGRESS)),
+              ),
+            ),
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(3)
@@ -249,11 +299,18 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(readStatus = listOf(ReadStatus.READ, ReadStatus.IN_PROGRESS, ReadStatus.UNREAD)),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(
+              SearchCondition.AnyOfSeries(
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.READ)),
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.IN_PROGRESS)),
+                SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.UNREAD)),
+              ),
+            ),
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(4)
@@ -267,11 +324,11 @@ class SeriesDtoDaoTest(
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(),
-          user.id,
-          PageRequest.of(0, 20),
-        ).sortedBy { it.name }
+        seriesDtoDao
+          .findAll(
+            SearchContext(user),
+            PageRequest.of(0, 20),
+          ).sortedBy { it.name }
 
       // then
       assertThat(found).hasSize(4)
@@ -289,15 +346,15 @@ class SeriesDtoDaoTest(
       seriesLifecycle.createSeries(makeSeries("Batman", library.id))
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "batman"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "batman"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(3)
@@ -315,15 +372,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "publisher:vertigo"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "publisher:vertigo"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -341,15 +398,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "status:hiatus"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "status:hiatus"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -367,15 +424,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "reading_direction:left_to_right"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "reading_direction:left_to_right"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -393,15 +450,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "age_rating:12"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "age_rating:12"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -419,15 +476,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "language:en-us"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "language:en-us"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -451,50 +508,55 @@ class SeriesDtoDaoTest(
 
       seriesMetadataLifecycle.aggregateMetadata(series)
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val foundByBookTag =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "book_tag:booktag"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "book_tag:booktag"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       val notFoundByBookTag =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "book_tag:seriestag"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "book_tag:seriestag"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       val foundBySeriesTag =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "series_tag:seriestag"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "series_tag:seriestag"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       val notFoundBySeriesTag =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "series_tag:booktag"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "series_tag:booktag"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       val foundByTagFromBook =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "tag:booktag"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "tag:booktag"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       val foundByTagFromSeries =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "tag:seriestag"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "tag:seriestag"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(foundByBookTag).hasSize(1)
@@ -525,15 +587,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "genre:action"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "genre:action"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -551,15 +613,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "total_book_count:5"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "total_book_count:5"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -585,15 +647,15 @@ class SeriesDtoDaoTest(
       }
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "book_count:2"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "book_count:2"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -621,29 +683,31 @@ class SeriesDtoDaoTest(
 
       seriesMetadataLifecycle.aggregateMetadata(series)
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val foundGeneric =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "author:david"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "author:david"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       val foundByRole =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "penciller:david"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "penciller:david"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       val notFoundByRole =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "writer:david"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "writer:david"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(foundGeneric).hasSize(1)
@@ -669,15 +733,15 @@ class SeriesDtoDaoTest(
 
       seriesMetadataLifecycle.aggregateMetadata(series)
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "release_date:1999"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "release_date:1999"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)
@@ -691,15 +755,15 @@ class SeriesDtoDaoTest(
       seriesLifecycle.createSeries(makeSeries("Batman and Robin", library.id))
 
       searchIndexLifecycle.rebuildIndex()
-      Thread.sleep(500) // index rebuild is done asynchronously, and need a slight delay to be updated
 
       // when
       val found =
-        seriesDtoDao.findAll(
-          SeriesSearchWithReadProgress(searchTerm = "deleted:true"),
-          user.id,
-          UnpagedSorted(Sort.by("relevance")),
-        ).content
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "deleted:true"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
 
       // then
       assertThat(found).hasSize(1)

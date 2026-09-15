@@ -27,9 +27,14 @@ export interface LibraryDto {
   seriesCover: SeriesCoverDto,
   hashFiles: boolean,
   hashPages: boolean,
+  hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
   unavailable: boolean,
+
+  // custom fields
+  unpinned: boolean,
+  order: number,
 }
 
 export interface LibraryCreationDto {
@@ -58,6 +63,7 @@ export interface LibraryCreationDto {
   seriesCover: SeriesCoverDto,
   hashFiles: boolean,
   hashPages: boolean,
+  hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
 }
@@ -88,6 +94,7 @@ export interface LibraryUpdateDto {
   seriesCover: SeriesCoverDto,
   hashFiles: boolean,
   hashPages: boolean,
+  hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
 }

@@ -60,7 +60,12 @@ class WebPubGenerator(
   protected fun buildThumbnailLinkDtos(bookId: String) =
     listOf(
       WPLinkDto(
-        href = ServletUriComponentsBuilder.fromCurrentContextPath().pathSegment(*pathSegments.toTypedArray()).path("books/$bookId/thumbnail").toUriString(),
+        href =
+          ServletUriComponentsBuilder
+            .fromCurrentContextPath()
+            .pathSegment(*pathSegments.toTypedArray())
+            .path("books/$bookId/thumbnail")
+            .toUriString(),
         type = thumbnailType.mediaType,
         properties = getExtraLinkProperties(),
       ),
@@ -80,7 +85,12 @@ class WebPubGenerator(
         readingOrder =
           pages.mapIndexed { index: Int, page: BookPage ->
             WPLinkDto(
-              href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/pages/${index + 1}").queryParam("contentNegotiation", "false").toUriString(),
+              href =
+                uriBuilder
+                  .cloneBuilder()
+                  .path("books/${bookDto.id}/pages/${index + 1}")
+                  .queryParam("contentNegotiation", "false")
+                  .toUriString(),
               type = page.mediaType,
               width = page.dimension?.width,
               height = page.dimension?.height,
@@ -88,7 +98,13 @@ class WebPubGenerator(
                 if (!recommendedImageMediaTypes.contains(page.mediaType) && imageConverter.canConvertMediaType(page.mediaType, MediaType.IMAGE_JPEG_VALUE))
                   listOf(
                     WPLinkDto(
-                      href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/pages/${index + 1}").queryParam("contentNegotiation", "false").queryParam("convert", "jpeg").toUriString(),
+                      href =
+                        uriBuilder
+                          .cloneBuilder()
+                          .path("books/${bookDto.id}/pages/${index + 1}")
+                          .queryParam("contentNegotiation", "false")
+                          .queryParam("convert", "jpeg")
+                          .toUriString(),
                       type = MediaType.IMAGE_JPEG_VALUE,
                       width = page.dimension?.width,
                       height = page.dimension?.height,
@@ -132,9 +148,9 @@ class WebPubGenerator(
   ): WPPublicationDto {
     val uriBuilder = ServletUriComponentsBuilder.fromCurrentContextPath().pathSegment(*pathSegments.toTypedArray())
     val extension =
-      when {
-        media.extension is ProxyExtension && media.extension.proxyForType<MediaExtensionEpub>() -> mediaRepository.findExtensionByIdOrNull(media.bookId) as? MediaExtensionEpub
-        media.extension is MediaExtensionEpub -> media.extension
+      when (media.extension) {
+        is ProxyExtension if media.extension.proxyForType<MediaExtensionEpub>() -> mediaRepository.findExtensionByIdOrNull(media.bookId) as? MediaExtensionEpub
+        is MediaExtensionEpub -> media.extension
         else -> null
       }
     return toBasePublicationDto(bookDto).let { publication ->
@@ -153,7 +169,12 @@ class WebPubGenerator(
         readingOrder =
           media.files.filter { it.subType == MediaFile.SubType.EPUB_PAGE }.map {
             WPLinkDto(
-              href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/resource/").path(it.fileName).toUriString(),
+              href =
+                uriBuilder
+                  .cloneBuilder()
+                  .path("books/${bookDto.id}/resource/")
+                  .path(it.fileName)
+                  .toUriString(),
               type = it.mediaType,
             )
           },
@@ -161,7 +182,12 @@ class WebPubGenerator(
           buildThumbnailLinkDtos(bookDto.id) +
             media.files.filter { it.subType == MediaFile.SubType.EPUB_ASSET }.map {
               WPLinkDto(
-                href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/resource/").path(it.fileName).toUriString(),
+                href =
+                  uriBuilder
+                    .cloneBuilder()
+                    .path("books/${bookDto.id}/resource/")
+                    .path(it.fileName)
+                    .toUriString(),
                 type = it.mediaType,
               )
             },
@@ -184,7 +210,7 @@ class WebPubGenerator(
       children = children.map { it.toWPLinkDto(uriBuilder) },
     )
 
-  protected open fun toWPMetadataDto(bookDto: BookDto) =
+  protected fun toWPMetadataDto(bookDto: BookDto) =
     WPMetadataDto(
       title = bookDto.metadata.title,
       description = bookDto.metadata.summary,

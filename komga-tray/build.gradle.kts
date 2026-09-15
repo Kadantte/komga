@@ -1,20 +1,28 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
   run {
     kotlin("jvm")
     kotlin("plugin.spring")
   }
-  id("com.gorylenko.gradle-git-properties") version "2.4.1"
-  id("org.jetbrains.compose") version "1.5.11"
-  id("dev.hydraulic.conveyor") version "1.8"
+  alias(libs.plugins.gradleGitProperties)
+  alias(libs.plugins.compose)
+  id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
+  id("dev.hydraulic.conveyor") version "2.0"
   application
 }
 
 group = "org.gotson"
 
+repositories {
+  mavenCentral()
+  google()
+}
+
 kotlin {
-  jvmToolchain(21)
+  compilerOptions {
+    jvmTarget = JvmTarget.JVM_17
+  }
 }
 
 tasks {
@@ -22,22 +30,18 @@ tasks {
     sourceCompatibility = "17"
     targetCompatibility = "17"
   }
-  withType<KotlinCompile> {
-    kotlinOptions {
-      jvmTarget = "17"
-    }
-  }
 }
 
 dependencies {
   implementation(project(":komga"))
 
   implementation(compose.desktop.currentOs)
+  implementation("org.jetbrains.compose.components:components-resources:${libs.versions.compose.get()}")
 
-  linuxAmd64(compose.desktop.linux_x64)
-  macAmd64(compose.desktop.macos_x64)
-  macAarch64(compose.desktop.macos_arm64)
-  windowsAmd64(compose.desktop.windows_x64)
+  linuxAmd64("org.jetbrains.compose.desktop:desktop-jvm-linux-x64:${libs.versions.compose.get()}")
+  macAmd64("org.jetbrains.compose.desktop:desktop-jvm-macos-x64:${libs.versions.compose.get()}")
+  macAarch64("org.jetbrains.compose.desktop:desktop-jvm-macos-arm64:${libs.versions.compose.get()}")
+  windowsAmd64("org.jetbrains.compose.desktop:desktop-jvm-windows-x64:${libs.versions.compose.get()}")
 }
 
 application {
@@ -46,7 +50,9 @@ application {
 
 // Work around temporary Compose bugs
 configurations.all {
-  attributes {
-    attribute(Attribute.of("ui", String::class.java), "awt")
+  if (isCanBeResolved || isCanBeConsumed) {
+    attributes {
+      attribute(Attribute.of("ui", String::class.java), "awt")
+    }
   }
 }

@@ -5,6 +5,7 @@ import org.gotson.komga.domain.model.ReadListRequestBookMatchBook
 import org.gotson.komga.domain.model.ReadListRequestBookMatchSeries
 import org.gotson.komga.domain.model.ReadListRequestBookMatches
 import org.gotson.komga.domain.persistence.ReadListRequestRepository
+import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
 import org.gotson.komga.infrastructure.jooq.noCase
 import org.gotson.komga.jooq.main.Tables
 import org.jooq.DSLContext
@@ -12,13 +13,16 @@ import org.jooq.impl.DSL.ltrim
 import org.jooq.impl.DSL.row
 import org.jooq.impl.DSL.value
 import org.jooq.impl.DSL.values
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 import java.time.LocalDate
 
 @Component
 class ReadListRequestDao(
-  private val dsl: DSLContext,
-) : ReadListRequestRepository {
+  dslRW: DSLContext,
+  @Qualifier("dslContextRO") dslRO: DSLContext,
+) : SplitDslDaoBase(dslRW, dslRO),
+  ReadListRequestRepository {
   private val sd = Tables.SERIES_METADATA
   private val b = Tables.BOOK
   private val bd = Tables.BOOK_METADATA
@@ -32,21 +36,26 @@ class ReadListRequestDao(
     val numberField = "number"
     val requestsTable = values(*requestsAsRows.toTypedArray()).`as`("request", indexField, seriesField, numberField)
     val matchedRequests =
-      dsl.select(
-        requestsTable.field(indexField, Int::class.java),
-        sd.SERIES_ID,
-        sd.TITLE,
-        bd.BOOK_ID,
-        bd.NUMBER,
-        bd.TITLE,
-        bma.RELEASE_DATE,
-      )
-        .from(requestsTable)
-        .innerJoin(sd).on(requestsTable.field(seriesField, String::class.java)?.eq(sd.TITLE.noCase()))
-        .leftJoin(bma).on(sd.SERIES_ID.eq(bma.SERIES_ID))
-        .innerJoin(b).on(sd.SERIES_ID.eq(b.SERIES_ID))
-        .innerJoin(bd).on(
-          b.ID.eq(bd.BOOK_ID)
+      dslRO
+        .select(
+          requestsTable.field(indexField, Int::class.java),
+          sd.SERIES_ID,
+          sd.TITLE,
+          bd.BOOK_ID,
+          bd.NUMBER,
+          bd.TITLE,
+          bma.RELEASE_DATE,
+        ).from(requestsTable)
+        .innerJoin(sd)
+        .on(requestsTable.field(seriesField, String::class.java)?.eq(sd.TITLE.noCase()))
+        .leftJoin(bma)
+        .on(sd.SERIES_ID.eq(bma.SERIES_ID))
+        .innerJoin(b)
+        .on(sd.SERIES_ID.eq(b.SERIES_ID))
+        .innerJoin(bd)
+        .on(
+          b.ID
+            .eq(bd.BOOK_ID)
             .and(ltrim(bd.NUMBER, value("0")).eq(ltrim(requestsTable.field(numberField, String::class.java), value("0")).noCase())),
         ).fetchGroups(requestsTable.field(indexField, Int::class.java))
         .mapValues { (_, records) ->

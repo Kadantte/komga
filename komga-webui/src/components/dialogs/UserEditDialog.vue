@@ -15,23 +15,11 @@
 
           <v-row>
             <v-col>
-              <v-checkbox
-                v-model="roles"
-                :label="$t('dialog.add_user.field_role_administrator')"
-                :value="UserRoles.ADMIN"
-                hide-details
-              />
-              <v-checkbox
-                v-model="roles"
-                :label="$t('dialog.add_user.field_role_page_streaming')"
-                :value="UserRoles.PAGE_STREAMING"
-                hide-details
-              />
-              <v-checkbox
-                v-model="roles"
-                :label="$t('dialog.add_user.field_role_file_download')"
-                :value="UserRoles.FILE_DOWNLOAD"
-                hide-details
+              <v-checkbox v-for="role in userRoles" :key="role.value"
+                          v-model="roles"
+                          :label="role.text"
+                          :value="role.value"
+                          hide-details
               />
             </v-col>
           </v-row>
@@ -55,14 +43,12 @@
 import {UserRoles} from '@/types/enum-users'
 import Vue from 'vue'
 import {ERROR} from '@/types/events'
-import {LibraryDto} from '@/types/komga-libraries'
 import {UserDto, UserUpdateDto} from '@/types/komga-users'
 
 export default Vue.extend({
   name: 'UserEditDialog',
   data: () => {
     return {
-      UserRoles,
       modal: false,
       roles: [] as string[],
     }
@@ -86,8 +72,11 @@ export default Vue.extend({
     },
   },
   computed: {
-    libraries(): LibraryDto[] {
-      return this.$store.state.komgaLibraries.libraries
+    userRoles(): any[] {
+      return Object.keys(UserRoles).map(x => ({
+        text: this.$t(`user_roles.${x}`),
+        value: x,
+      }))
     },
   },
   methods: {

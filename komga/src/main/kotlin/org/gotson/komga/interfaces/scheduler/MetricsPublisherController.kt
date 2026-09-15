@@ -1,6 +1,5 @@
 package org.gotson.komga.interfaces.scheduler
 
-import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -20,8 +19,6 @@ import org.springframework.context.annotation.Profile
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Component
 import java.util.concurrent.atomic.AtomicLong
-
-private val logger = KotlinLogging.logger {}
 
 private const val LIBRARIES = "libraries"
 private const val SERIES = "series"
@@ -46,11 +43,13 @@ class MetricsPublisherController(
   private val meterRegistry: MeterRegistry,
 ) {
   init {
-    Timer.builder(METER_TASKS_EXECUTION)
+    Timer
+      .builder(METER_TASKS_EXECUTION)
       .description("Task execution time")
       .register(meterRegistry)
 
-    Counter.builder(METER_TASKS_FAILURE)
+    Counter
+      .builder(METER_TASKS_FAILURE)
       .description("Count of failed tasks")
       .register(meterRegistry)
   }
@@ -61,7 +60,8 @@ class MetricsPublisherController(
 
   val multiGauges =
     entitiesMultiTag.associateWith { entity ->
-      MultiGauge.builder("komga.$entity")
+      MultiGauge
+        .builder("komga.$entity")
         .description("The number of $entity")
         .baseUnit("count")
         .register(meterRegistry)
@@ -70,7 +70,8 @@ class MetricsPublisherController(
   val noTagGauges =
     entitiesNoTags.associateWith { entity ->
       AtomicLong(0).also { value ->
-        Gauge.builder("komga.$entity", value) { value.get().toDouble() }
+        Gauge
+          .builder("komga.$entity", value) { value.get().toDouble() }
           .description("The number of $entity")
           .baseUnit("count")
           .register(meterRegistry)
@@ -78,7 +79,8 @@ class MetricsPublisherController(
     }
 
   val bookFileSizeGauge =
-    MultiGauge.builder("komga.$BOOKS_FILESIZE")
+    MultiGauge
+      .builder("komga.$BOOKS_FILESIZE")
       .description("The cumulated filesize of books")
       .baseUnit("bytes")
       .register(meterRegistry)
@@ -113,10 +115,10 @@ class MetricsPublisherController(
       COLLECTIONS -> noTagGauges[COLLECTIONS]?.set(collectionRepository.count())
       READLISTS -> noTagGauges[READLISTS]?.set(readListRepository.count())
 
-      SERIES -> multiGauges[SERIES]?.register(seriesRepository.countGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) })
-      BOOKS -> multiGauges[BOOKS]?.register(bookRepository.countGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) })
-      BOOKS_FILESIZE -> bookFileSizeGauge.register(bookRepository.getFilesizeGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) })
-      SIDECARS -> multiGauges[SIDECARS]?.register(sidecarRepository.countGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) })
+      SERIES -> multiGauges[SERIES]?.register(seriesRepository.countGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) }, true)
+      BOOKS -> multiGauges[BOOKS]?.register(bookRepository.countGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) }, true)
+      BOOKS_FILESIZE -> bookFileSizeGauge.register(bookRepository.getFilesizeGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) }, true)
+      SIDECARS -> multiGauges[SIDECARS]?.register(sidecarRepository.countGroupedByLibraryId().map { Row.of(Tags.of("library", it.key), it.value) }, true)
     }
   }
 }

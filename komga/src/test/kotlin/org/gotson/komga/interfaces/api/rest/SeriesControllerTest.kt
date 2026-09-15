@@ -8,7 +8,6 @@ import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.domain.model.KomgaUser
 import org.gotson.komga.domain.model.MarkSelectedPreference
 import org.gotson.komga.domain.model.Media
-import org.gotson.komga.domain.model.ROLE_ADMIN
 import org.gotson.komga.domain.model.SeriesMetadata
 import org.gotson.komga.domain.model.ThumbnailBook
 import org.gotson.komga.domain.model.makeBook
@@ -78,7 +77,7 @@ class SeriesControllerTest(
   @BeforeAll
   fun `setup library`() {
     libraryRepository.insert(library)
-    userRepository.insert(KomgaUser("user@example.org", "", false, id = "1"))
+    userRepository.insert(KomgaUser("user@example.org", "", id = "1"))
   }
 
   @AfterAll
@@ -107,19 +106,19 @@ class SeriesControllerTest(
       }
       seriesLifecycle.createSeries(makeSeries("TheBeta", libraryId = library.id))
 
-      mockMvc.get("/api/v1/series") {
-        param("search_regex", "a$,title_sort")
-      }
-        .andExpect {
+      mockMvc
+        .get("/api/v1/series") {
+          param("search_regex", "a$,title_sort")
+        }.andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(1) }
           jsonPath("$.content[0].metadata.title") { value("TheBeta") }
         }
 
-      mockMvc.get("/api/v1/series") {
-        param("search_regex", "^the,title")
-      }
-        .andExpect {
+      mockMvc
+        .get("/api/v1/series") {
+          param("search_regex", "^the,title")
+        }.andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(2) }
           jsonPath("$.content[0].metadata.title") { value("TheAlpha") }
@@ -139,7 +138,8 @@ class SeriesControllerTest(
       }
       seriesLifecycle.createSeries(makeSeries("Beta", libraryId = library.id))
 
-      mockMvc.get("/api/v1/series")
+      mockMvc
+        .get("/api/v1/series")
         .andExpect {
           status { isOk() }
           jsonPath("$.content[0].metadata.title") { value("TheAlpha") }
@@ -156,10 +156,10 @@ class SeriesControllerTest(
           seriesLifecycle.createSeries(it)
         }
 
-      mockMvc.get("/api/v1/series") {
-        param("sort", "metadata.titleSort,asc")
-      }
-        .andExpect {
+      mockMvc
+        .get("/api/v1/series") {
+          param("sort", "metadata.titleSort,asc")
+        }.andExpect {
           status { isOk() }
           jsonPath("$.content[0].metadata.title") { value("a") }
           jsonPath("$.content[1].metadata.title") { value(Matchers.equalToIgnoringCase("b")) }
@@ -186,7 +186,8 @@ class SeriesControllerTest(
       seriesLifecycle.addBooks(createdSeries, listOf(addedBook))
       seriesLifecycle.sortBooks(createdSeries)
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}/books")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}/books")
         .andExpect {
           status { isOk() }
           jsonPath("$.content[0].name") { value("1") }
@@ -210,7 +211,8 @@ class SeriesControllerTest(
       seriesLifecycle.addBooks(createdSeries, listOf(addedBook))
       seriesLifecycle.sortBooks(createdSeries)
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}/books")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}/books")
         .andExpect {
           status { isOk() }
           jsonPath("$.content[0].name") { value("1") }
@@ -245,7 +247,8 @@ class SeriesControllerTest(
         }
       }
 
-      mockMvc.get("/api/v1/series")
+      mockMvc
+        .get("/api/v1/series")
         .andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(1) }
@@ -305,7 +308,8 @@ class SeriesControllerTest(
       mockMvc.get("/api/v1/series/${series15.id}").andExpect { status { isForbidden() } }
       mockMvc.get("/api/v1/series/${series.id}").andExpect { status { isForbidden() } }
 
-      mockMvc.get("/api/v1/series?sort=metadata.titleSort")
+      mockMvc
+        .get("/api/v1/series?sort=metadata.titleSort")
         .andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(2) }
@@ -363,7 +367,8 @@ class SeriesControllerTest(
       mockMvc.get("/api/v1/series/${series16.id}").andExpect { status { isForbidden() } }
       mockMvc.get("/api/v1/series/${series18.id}").andExpect { status { isForbidden() } }
 
-      mockMvc.get("/api/v1/series?sort=metadata.titleSort")
+      mockMvc
+        .get("/api/v1/series?sort=metadata.titleSort")
         .andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(2) }
@@ -421,7 +426,8 @@ class SeriesControllerTest(
       mockMvc.get("/api/v1/series/${seriesAdult.id}").andExpect { status { isForbidden() } }
       mockMvc.get("/api/v1/series/${series.id}").andExpect { status { isForbidden() } }
 
-      mockMvc.get("/api/v1/series?sort=metadata.titleSort")
+      mockMvc
+        .get("/api/v1/series?sort=metadata.titleSort")
         .andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(2) }
@@ -479,7 +485,8 @@ class SeriesControllerTest(
       mockMvc.get("/api/v1/series/${seriesAdult.id}").andExpect { status { isOk() } }
       mockMvc.get("/api/v1/series/${series.id}").andExpect { status { isOk() } }
 
-      mockMvc.get("/api/v1/series?sort=metadata.titleSort")
+      mockMvc
+        .get("/api/v1/series?sort=metadata.titleSort")
         .andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(2) }
@@ -537,7 +544,8 @@ class SeriesControllerTest(
       mockMvc.get("/api/v1/series/${seriesAdult.id}").andExpect { status { isForbidden() } }
       mockMvc.get("/api/v1/series/${series.id}").andExpect { status { isForbidden() } }
 
-      mockMvc.get("/api/v1/series?sort=metadata.titleSort")
+      mockMvc
+        .get("/api/v1/series?sort=metadata.titleSort")
         .andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(2) }
@@ -562,7 +570,8 @@ class SeriesControllerTest(
 
       mockMvc.get("/api/v1/series/${seriesTeen16.id}").andExpect { status { isForbidden() } }
 
-      mockMvc.get("/api/v1/series")
+      mockMvc
+        .get("/api/v1/series")
         .andExpect {
           status { isOk() }
           jsonPath("$.content.length()") { value(0) }
@@ -583,7 +592,8 @@ class SeriesControllerTest(
           }
         }
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}")
         .andExpect { status { isForbidden() } }
     }
 
@@ -598,7 +608,8 @@ class SeriesControllerTest(
           }
         }
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}/thumbnail")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}/thumbnail")
         .andExpect { status { isForbidden() } }
     }
 
@@ -613,7 +624,8 @@ class SeriesControllerTest(
           }
         }
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}/books")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}/books")
         .andExpect { status { isForbidden() } }
     }
 
@@ -628,7 +640,8 @@ class SeriesControllerTest(
           }
         }
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}/file")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}/file")
         .andExpect { status { isForbidden() } }
     }
   }
@@ -646,7 +659,8 @@ class SeriesControllerTest(
           }
         }
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}/file")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}/file")
         .andExpect { status { isForbidden() } }
     }
   }
@@ -664,7 +678,8 @@ class SeriesControllerTest(
           }
         }
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}/thumbnail")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}/thumbnail")
         .andExpect { status { isNotFound() } }
     }
   }
@@ -687,16 +702,20 @@ class SeriesControllerTest(
         jsonPath("$.content[0].url") { value("") }
       }
 
-      mockMvc.get("/api/v1/series")
+      mockMvc
+        .get("/api/v1/series")
         .andExpect(validation)
 
-      mockMvc.get("/api/v1/series/latest")
+      mockMvc
+        .get("/api/v1/series/latest")
         .andExpect(validation)
 
-      mockMvc.get("/api/v1/series/new")
+      mockMvc
+        .get("/api/v1/series/new")
         .andExpect(validation)
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}")
         .andExpect {
           status { isOk() }
           jsonPath("$.url") { value("") }
@@ -704,7 +723,7 @@ class SeriesControllerTest(
     }
 
     @Test
-    @WithMockCustomUser(roles = [ROLE_ADMIN])
+    @WithMockCustomUser(roles = ["ADMIN"])
     fun `given admin user when getting series then url is available`() {
       val createdSeries =
         makeSeries(name = "series", libraryId = library.id).let { series ->
@@ -719,16 +738,20 @@ class SeriesControllerTest(
         jsonPath("$.content[0].url") { value(Matchers.containsString("series")) }
       }
 
-      mockMvc.get("/api/v1/series")
+      mockMvc
+        .get("/api/v1/series")
         .andExpect(validation)
 
-      mockMvc.get("/api/v1/series/latest")
+      mockMvc
+        .get("/api/v1/series/latest")
         .andExpect(validation)
 
-      mockMvc.get("/api/v1/series/new")
+      mockMvc
+        .get("/api/v1/series/new")
         .andExpect(validation)
 
-      mockMvc.get("/api/v1/series/${createdSeries.id}")
+      mockMvc
+        .get("/api/v1/series/${createdSeries.id}")
         .andExpect {
           status { isOk() }
           jsonPath("$.url") { value(Matchers.containsString("series")) }
@@ -741,12 +764,13 @@ class SeriesControllerTest(
     @Test
     @WithMockCustomUser
     fun `given non-admin user when updating metadata then raise forbidden`() {
-      mockMvc.patch("/api/v1/series/1/metadata") {
-        contentType = MediaType.APPLICATION_JSON
-        content = "{}"
-      }.andExpect {
-        status { isForbidden() }
-      }
+      mockMvc
+        .patch("/api/v1/series/1/metadata") {
+          contentType = MediaType.APPLICATION_JSON
+          content = "{}"
+        }.andExpect {
+          status { isForbidden() }
+        }
     }
 
     @ParameterizedTest
@@ -759,18 +783,19 @@ class SeriesControllerTest(
         """{"language":"japanese"}""",
       ],
     )
-    @WithMockCustomUser(roles = [ROLE_ADMIN])
+    @WithMockCustomUser(roles = ["ADMIN"])
     fun `given invalid json when updating metadata then raise validation error`(jsonString: String) {
-      mockMvc.patch("/api/v1/series/1/metadata") {
-        contentType = MediaType.APPLICATION_JSON
-        content = jsonString
-      }.andExpect {
-        status { isBadRequest() }
-      }
+      mockMvc
+        .patch("/api/v1/series/1/metadata") {
+          contentType = MediaType.APPLICATION_JSON
+          content = jsonString
+        }.andExpect {
+          status { isBadRequest() }
+        }
     }
 
     @Test
-    @WithMockCustomUser(roles = [ROLE_ADMIN])
+    @WithMockCustomUser(roles = ["ADMIN"])
     fun `given valid json when updating metadata then fields are updated`() {
       val createdSeries =
         makeSeries(name = "series", libraryId = library.id).let { series ->
@@ -809,12 +834,13 @@ class SeriesControllerTest(
         }
         """.trimIndent()
 
-      mockMvc.patch("/api/v1/series/${createdSeries.id}/metadata") {
-        contentType = MediaType.APPLICATION_JSON
-        content = jsonString
-      }.andExpect {
-        status { isNoContent() }
-      }
+      mockMvc
+        .patch("/api/v1/series/${createdSeries.id}/metadata") {
+          contentType = MediaType.APPLICATION_JSON
+          content = jsonString
+        }.andExpect {
+          status { isNoContent() }
+        }
 
       val updatedMetadata = seriesMetadataRepository.findById(createdSeries.id)
       with(updatedMetadata) {
@@ -845,7 +871,7 @@ class SeriesControllerTest(
     }
 
     @Test
-    @WithMockCustomUser(roles = [ROLE_ADMIN])
+    @WithMockCustomUser(roles = ["ADMIN"])
     fun `given json with null fields when updating metadata then fields with null are unset`() {
       val createdSeries =
         makeSeries(name = "series", libraryId = library.id).let { series ->
@@ -887,12 +913,13 @@ class SeriesControllerTest(
         }
         """.trimIndent()
 
-      mockMvc.patch("/api/v1/series/${createdSeries.id}/metadata") {
-        contentType = MediaType.APPLICATION_JSON
-        content = jsonString
-      }.andExpect {
-        status { isNoContent() }
-      }
+      mockMvc
+        .patch("/api/v1/series/${createdSeries.id}/metadata") {
+          contentType = MediaType.APPLICATION_JSON
+          content = jsonString
+        }.andExpect {
+          status { isNoContent() }
+        }
 
       val updatedMetadata = seriesMetadataRepository.findById(createdSeries.id)
       with(updatedMetadata) {
@@ -935,16 +962,19 @@ class SeriesControllerTest(
       val url = "/api/v1/series/${createdSeries.id}/thumbnail"
 
       val response =
-        mockMvc.get(url)
-          .andReturn().response
+        mockMvc
+          .get(url)
+          .andReturn()
+          .response
 
-      mockMvc.get(url) {
-        headers {
-          ifNoneMatch = listOf(response.getHeader(HttpHeaders.ETAG)!!)
+      mockMvc
+        .get(url) {
+          headers {
+            ifNoneMatch = listOf(response.getHeader(HttpHeaders.ETAG)!!)
+          }
+        }.andExpect {
+          status { isNotModified() }
         }
-      }.andExpect {
-        status { isNotModified() }
-      }
     }
 
     @Test
@@ -982,13 +1012,14 @@ class SeriesControllerTest(
         }
       }
 
-      mockMvc.get(url) {
-        headers {
-          ifNoneMatch = listOf(response.getHeader(HttpHeaders.ETAG)!!)
+      mockMvc
+        .get(url) {
+          headers {
+            ifNoneMatch = listOf(response.getHeader(HttpHeaders.ETAG)!!)
+          }
+        }.andExpect {
+          status { isOk() }
         }
-      }.andExpect {
-        status { isOk() }
-      }
     }
   }
 
@@ -1017,19 +1048,22 @@ class SeriesControllerTest(
         }
       }
 
-      mockMvc.post("/api/v1/series/${series.id}/read-progress")
+      mockMvc
+        .post("/api/v1/series/${series.id}/read-progress")
         .andExpect {
           status { isNoContent() }
         }
 
-      mockMvc.get("/api/v1/series/${series.id}")
+      mockMvc
+        .get("/api/v1/series/${series.id}")
         .andExpect {
           status { isOk() }
           jsonPath("$.booksUnreadCount") { value(0) }
           jsonPath("$.booksReadCount") { value(2) }
         }
 
-      mockMvc.get("/api/v1/series/${series.id}/books")
+      mockMvc
+        .get("/api/v1/series/${series.id}/books")
         .andExpect {
           status { isOk() }
           jsonPath("$.content[0].readProgress.completed") { value(true) }
@@ -1061,24 +1095,28 @@ class SeriesControllerTest(
         }
       }
 
-      mockMvc.post("/api/v1/series/${series.id}/read-progress")
+      mockMvc
+        .post("/api/v1/series/${series.id}/read-progress")
         .andExpect {
           status { isNoContent() }
         }
 
-      mockMvc.delete("/api/v1/series/${series.id}/read-progress")
+      mockMvc
+        .delete("/api/v1/series/${series.id}/read-progress")
         .andExpect {
           status { isNoContent() }
         }
 
-      mockMvc.get("/api/v1/series/${series.id}")
+      mockMvc
+        .get("/api/v1/series/${series.id}")
         .andExpect {
           status { isOk() }
           jsonPath("$.booksUnreadCount") { value(2) }
           jsonPath("$.booksReadCount") { value(0) }
         }
 
-      mockMvc.get("/api/v1/series/${series.id}/books")
+      mockMvc
+        .get("/api/v1/series/${series.id}/books")
         .andExpect {
           status { isOk() }
           jsonPath("$.content[0].readProgress") { value(IsNull.nullValue()) }
@@ -1127,7 +1165,8 @@ class SeriesControllerTest(
         content = """{"completed":true}"""
       }
 
-      mockMvc.get("/api/v1/series/${series.id}")
+      mockMvc
+        .get("/api/v1/series/${series.id}")
         .andExpect {
           status { isOk() }
           jsonPath("$.booksUnreadCount") { value(1) }
@@ -1144,7 +1183,8 @@ class SeriesControllerTest(
     fun `given series with Unicode name when getting series file then attachment name is correct`() {
       val name = "アキラ"
       val tempFile =
-        Files.createTempFile(name, ".cbz")
+        Files
+          .createTempFile(name, ".cbz")
           .also { it.toFile().deleteOnExit() }
       val series =
         makeSeries(name = name, libraryId = library.id).let { series ->
@@ -1155,7 +1195,8 @@ class SeriesControllerTest(
           series
         }
 
-      mockMvc.get("/api/v1/series/${series.id}/file")
+      mockMvc
+        .get("/api/v1/series/${series.id}/file")
         .andExpect {
           status { isOk() }
           header { string("Content-Disposition", Matchers.containsString(URLEncoder.encode(name, StandardCharsets.UTF_8.name()))) }
@@ -1175,7 +1216,8 @@ class SeriesControllerTest(
         )
       libraryContentLifecycle.scanRootFolder(library)
 
-      mockMvc.get("/api/v1/series/updated")
+      mockMvc
+        .get("/api/v1/series/updated")
         .andExpect {
           status { isOk() }
           jsonPath("$.content") { isEmpty() }

@@ -4,21 +4,22 @@ import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
 import io.swagger.v3.oas.annotations.responses.ApiResponse
-import org.gotson.komga.domain.model.BookSearchWithReadProgress
+import org.gotson.komga.domain.model.BookSearch
 import org.gotson.komga.domain.model.KomgaUser
 import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.model.Media
-import org.gotson.komga.domain.model.ROLE_PAGE_STREAMING
 import org.gotson.komga.domain.model.ReadList
 import org.gotson.komga.domain.model.ReadStatus
+import org.gotson.komga.domain.model.SearchCondition
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.model.SeriesCollection
-import org.gotson.komga.domain.model.SeriesSearchWithReadProgress
+import org.gotson.komga.domain.model.SeriesSearch
 import org.gotson.komga.domain.persistence.LibraryRepository
 import org.gotson.komga.domain.persistence.ReadListRepository
 import org.gotson.komga.domain.persistence.ReferentialRepository
 import org.gotson.komga.domain.persistence.SeriesCollectionRepository
 import org.gotson.komga.infrastructure.security.KomgaPrincipal
-import org.gotson.komga.infrastructure.swagger.PageAsQueryParam
 import org.gotson.komga.interfaces.api.CommonBookController
 import org.gotson.komga.interfaces.api.ContentRestrictionChecker
 import org.gotson.komga.interfaces.api.OpdsGenerator
@@ -97,8 +98,8 @@ class Opds2Controller(
   private fun linkPage(
     uriBuilder: UriComponentsBuilder,
     page: Page<*>,
-  ): List<WPLinkDto> {
-    return listOfNotNull(
+  ): List<WPLinkDto> =
+    listOfNotNull(
       if (!page.isFirst)
         WPLinkDto(
           rel = OpdsLinkRel.PREVIOUS,
@@ -114,7 +115,6 @@ class Opds2Controller(
       else
         null,
     )
-  }
 
   private fun linkSelf(
     path: String,
@@ -180,49 +180,62 @@ class Opds2Controller(
     val (library, authorizedLibraryIds) = checkLibraryAccess(libraryId, principal)
 
     val keepReading =
-      bookDtoRepository.findAll(
-        BookSearchWithReadProgress(
-          libraryIds = authorizedLibraryIds,
-          readStatus = setOf(ReadStatus.IN_PROGRESS),
-          mediaStatus = setOf(Media.Status.READY),
-          deleted = false,
-        ),
-        principal.user.id,
-        PageRequest.of(0, RECOMMENDED_ITEMS_NUMBER, Sort.by(Sort.Order.desc("readProgress.readDate"))),
-        principal.user.restrictions,
-      ).map { opdsGenerator.toOpdsPublicationDto(it) }
+      bookDtoRepository
+        .findAll(
+          BookSearch(
+            SearchCondition.AllOfBook(
+              buildList {
+                if (library != null) add(SearchCondition.LibraryId(SearchOperator.Is(library.id)))
+                add(SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.IN_PROGRESS)))
+                add(SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.READY)))
+                add(SearchCondition.Deleted(SearchOperator.IsFalse))
+              },
+            ),
+          ),
+          SearchContext(principal.user),
+          PageRequest.of(0, RECOMMENDED_ITEMS_NUMBER, Sort.by(Sort.Order.desc("readProgress.readDate"))),
+        ).map { opdsGenerator.toOpdsPublicationDto(it) }
 
     val onDeck =
-      bookDtoRepository.findAllOnDeck(
-        principal.user.id,
-        authorizedLibraryIds,
-        Pageable.ofSize(RECOMMENDED_ITEMS_NUMBER),
-        principal.user.restrictions,
-      ).map { opdsGenerator.toOpdsPublicationDto(it) }
+      bookDtoRepository
+        .findAllOnDeck(
+          principal.user.id,
+          authorizedLibraryIds,
+          Pageable.ofSize(RECOMMENDED_ITEMS_NUMBER),
+          principal.user.restrictions,
+        ).map { opdsGenerator.toOpdsPublicationDto(it) }
 
     val latestBooks =
-      bookDtoRepository.findAll(
-        BookSearchWithReadProgress(
-          libraryIds = authorizedLibraryIds,
-          mediaStatus = setOf(Media.Status.READY),
-          deleted = false,
-        ),
-        principal.user.id,
-        PageRequest.of(0, RECOMMENDED_ITEMS_NUMBER, Sort.by(Sort.Order.desc("createdDate"))),
-        principal.user.restrictions,
-      ).map { opdsGenerator.toOpdsPublicationDto(it) }
+      bookDtoRepository
+        .findAll(
+          BookSearch(
+            SearchCondition.AllOfBook(
+              buildList {
+                if (library != null) add(SearchCondition.LibraryId(SearchOperator.Is(library.id)))
+                add(SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.READY)))
+                add(SearchCondition.Deleted(SearchOperator.IsFalse))
+              },
+            ),
+          ),
+          SearchContext(principal.user),
+          PageRequest.of(0, RECOMMENDED_ITEMS_NUMBER, Sort.by(Sort.Order.desc("createdDate"))),
+        ).map { opdsGenerator.toOpdsPublicationDto(it) }
 
     val latestSeries =
-      seriesDtoRepository.findAll(
-        SeriesSearchWithReadProgress(
-          libraryIds = authorizedLibraryIds,
-          deleted = false,
-          oneshot = false,
-        ),
-        principal.user.id,
-        PageRequest.of(0, RECOMMENDED_ITEMS_NUMBER, Sort.by(Sort.Order.desc("lastModified"))),
-        principal.user.restrictions,
-      ).map { it.toWPLinkDto() }
+      seriesDtoRepository
+        .findAll(
+          SeriesSearch(
+            SearchCondition.AllOfSeries(
+              buildList {
+                if (library != null) add(SearchCondition.LibraryId(SearchOperator.Is(library.id)))
+                add(SearchCondition.Deleted(SearchOperator.IsFalse))
+                add(SearchCondition.OneShot(SearchOperator.IsFalse))
+              },
+            ),
+          ),
+          SearchContext(principal.user),
+          PageRequest.of(0, RECOMMENDED_ITEMS_NUMBER, Sort.by(Sort.Order.desc("lastModified"))),
+        ).map { it.toWPLinkDto() }
 
     val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}")
 
@@ -278,27 +291,27 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping(value = ["libraries/keep-reading", "libraries/{id}/keep-reading"])
   fun getKeepReading(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id", required = false) libraryId: String?,
     @Parameter(hidden = true) page: Pageable,
   ): FeedDto {
-    val (library, authorizedLibraryIds) = checkLibraryAccess(libraryId, principal)
+    val (library, _) = checkLibraryAccess(libraryId, principal)
 
     val entries =
-      bookDtoRepository.findAll(
-        BookSearchWithReadProgress(
-          libraryIds = authorizedLibraryIds,
-          readStatus = setOf(ReadStatus.IN_PROGRESS),
-          mediaStatus = setOf(Media.Status.READY),
-          deleted = false,
-        ),
-        principal.user.id,
-        PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.desc("readProgress.readDate"))),
-        principal.user.restrictions,
-      ).map { opdsGenerator.toOpdsPublicationDto(it) }
+      bookDtoRepository
+        .findAll(
+          BookSearch(
+            SearchCondition.AllOfBook(
+              SearchCondition.ReadStatus(SearchOperator.Is(ReadStatus.IN_PROGRESS)),
+              SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.READY)),
+              SearchCondition.Deleted(SearchOperator.IsFalse),
+            ),
+          ),
+          SearchContext(principal.user),
+          PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.desc("readProgress.readDate"))),
+        ).map { opdsGenerator.toOpdsPublicationDto(it) }
 
     val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/keep-reading")
 
@@ -320,7 +333,6 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping(value = ["libraries/on-deck", "libraries/{id}/on-deck"])
   fun getOnDeck(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -330,12 +342,13 @@ class Opds2Controller(
     val (library, authorizedLibraryIds) = checkLibraryAccess(libraryId, principal)
 
     val entries =
-      bookDtoRepository.findAllOnDeck(
-        principal.user.id,
-        authorizedLibraryIds,
-        page,
-        principal.user.restrictions,
-      ).map { opdsGenerator.toOpdsPublicationDto(it) }
+      bookDtoRepository
+        .findAllOnDeck(
+          principal.user.id,
+          authorizedLibraryIds,
+          page,
+          principal.user.restrictions,
+        ).map { opdsGenerator.toOpdsPublicationDto(it) }
 
     val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/on-deck")
 
@@ -357,26 +370,26 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping(value = ["libraries/books/latest", "libraries/{id}/books/latest"])
   fun getLatestBooks(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id", required = false) libraryId: String?,
     @Parameter(hidden = true) page: Pageable,
   ): FeedDto {
-    val (library, authorizedLibraryIds) = checkLibraryAccess(libraryId, principal)
+    val (library, _) = checkLibraryAccess(libraryId, principal)
 
     val entries =
-      bookDtoRepository.findAll(
-        BookSearchWithReadProgress(
-          libraryIds = authorizedLibraryIds,
-          mediaStatus = setOf(Media.Status.READY),
-          deleted = false,
-        ),
-        principal.user.id,
-        PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.desc("createdDate"))),
-        principal.user.restrictions,
-      ).map { opdsGenerator.toOpdsPublicationDto(it) }
+      bookDtoRepository
+        .findAll(
+          BookSearch(
+            SearchCondition.AllOfBook(
+              SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.READY)),
+              SearchCondition.Deleted(SearchOperator.IsFalse),
+            ),
+          ),
+          SearchContext(principal.user),
+          PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.desc("createdDate"))),
+        ).map { opdsGenerator.toOpdsPublicationDto(it) }
 
     val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/books/latest")
 
@@ -398,28 +411,31 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping(value = ["libraries/series/latest", "libraries/{id}/series/latest"])
   fun getLatestSeries(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id", required = false) libraryId: String?,
     @Parameter(hidden = true) page: Pageable,
   ): FeedDto {
-    val (library, authorizedLibraryIds) = checkLibraryAccess(libraryId, principal)
+    val (library, _) = checkLibraryAccess(libraryId, principal)
 
     val entries =
-      seriesDtoRepository.findAll(
-        SeriesSearchWithReadProgress(
-          libraryIds = authorizedLibraryIds,
-          deleted = false,
-          oneshot = false,
-        ),
-        principal.user.id,
-        PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.desc("lastModified"))),
-        principal.user.restrictions,
-      ).map { it.toWPLinkDto() }
+      seriesDtoRepository
+        .findAll(
+          SeriesSearch(
+            SearchCondition.AllOfSeries(
+              buildList {
+                if (library != null) add(SearchCondition.LibraryId(SearchOperator.Is(library.id)))
+                add(SearchCondition.Deleted(SearchOperator.IsFalse))
+                add(SearchCondition.OneShot(SearchOperator.IsFalse))
+              },
+            ),
+          ),
+          SearchContext(principal.user),
+          PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.desc("lastModified"))),
+        ).map { it.toWPLinkDto() }
 
-    val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/books/latest")
+    val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/series/latest")
 
     return FeedDto(
       metadata =
@@ -439,7 +455,6 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping(value = ["libraries/browse", "libraries/{id}/browse"])
   fun getLibrariesBrowse(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -450,15 +465,21 @@ class Opds2Controller(
     val (library, authorizedLibraryIds) = checkLibraryAccess(libraryId, principal)
 
     val seriesSearch =
-      SeriesSearchWithReadProgress(
-        libraryIds = authorizedLibraryIds,
-        publishers = publishers,
-        deleted = false,
+      SeriesSearch(
+        SearchCondition.AllOfSeries(
+          buildList {
+            if (library != null) add(SearchCondition.LibraryId(SearchOperator.Is(library.id)))
+            if (!publishers.isNullOrEmpty()) {
+              add(SearchCondition.AllOfSeries(publishers.map { SearchCondition.Publisher(SearchOperator.Is(it)) }))
+            }
+            add(SearchCondition.Deleted(SearchOperator.IsFalse))
+          },
+        ),
       )
 
     val pageable = PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.asc("metadata.titleSort")))
 
-    val entries = seriesDtoRepository.findAll(seriesSearch, principal.user.id, pageable, principal.user.restrictions).map { it.toWPLinkDto() }
+    val entries = seriesDtoRepository.findAll(seriesSearch, SearchContext(principal.user), pageable).map { it.toWPLinkDto() }
 
     val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/browse")
 
@@ -494,7 +515,6 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping(value = ["libraries/collections", "libraries/{id}/collections"])
   fun getLibrariesCollections(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -505,11 +525,12 @@ class Opds2Controller(
 
     val pageable = PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.asc("name")))
     val entries =
-      collectionRepository.findAll(
-        authorizedLibraryIds,
-        authorizedLibraryIds,
-        pageable = pageable,
-      ).map { it.toWPLinkDto() }
+      collectionRepository
+        .findAll(
+          authorizedLibraryIds,
+          authorizedLibraryIds,
+          pageable = pageable,
+        ).map { it.toWPLinkDto() }
 
     val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/collections")
 
@@ -535,7 +556,6 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping("collections/{id}")
   fun getOneCollection(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -551,12 +571,14 @@ class Opds2Controller(
       val pageable = PageRequest.of(page.pageNumber, page.pageSize, sort)
 
       val seriesSearch =
-        SeriesSearchWithReadProgress(
-          libraryIds = principal.user.getAuthorizedLibraryIds(null),
-          deleted = false,
+        SeriesSearch(
+          SearchCondition.AllOfSeries(
+            SearchCondition.CollectionId(SearchOperator.Is(collection.id)),
+            SearchCondition.Deleted(SearchOperator.IsFalse),
+          ),
         )
 
-      val entries = seriesDtoRepository.findAllByCollectionId(collection.id, seriesSearch, principal.user.id, pageable, principal.user.restrictions).map { it.toWPLinkDto() }
+      val entries = seriesDtoRepository.findAll(seriesSearch, SearchContext(principal.user), pageable).map { it.toWPLinkDto() }
 
       val uriBuilder = uriBuilder("collections/$id")
 
@@ -577,7 +599,6 @@ class Opds2Controller(
       )
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
-  @PageAsQueryParam
   @GetMapping(value = ["libraries/readlists", "libraries/{id}/readlists"])
   fun getLibrariesReadLists(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -588,11 +609,12 @@ class Opds2Controller(
 
     val pageable = PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.asc("name")))
     val entries =
-      readListRepository.findAll(
-        authorizedLibraryIds,
-        authorizedLibraryIds,
-        pageable = pageable,
-      ).map { it.toWPLinkDto() }
+      readListRepository
+        .findAll(
+          authorizedLibraryIds,
+          authorizedLibraryIds,
+          pageable = pageable,
+        ).map { it.toWPLinkDto() }
 
     val uriBuilder = uriBuilder("libraries${if (library != null) "/${library.id}" else ""}/readlists")
 
@@ -618,7 +640,6 @@ class Opds2Controller(
     )
   }
 
-  @PageAsQueryParam
   @GetMapping("readlists/{id}")
   fun getOneReadList(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -634,20 +655,14 @@ class Opds2Controller(
       val pageable = PageRequest.of(page.pageNumber, page.pageSize, sort)
 
       val bookSearch =
-        BookSearchWithReadProgress(
-          mediaStatus = setOf(Media.Status.READY),
-          deleted = false,
+        BookSearch(
+          SearchCondition.AllOfBook(
+            SearchCondition.ReadListId(SearchOperator.Is(readList.id)),
+            SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.READY)),
+            SearchCondition.Deleted(SearchOperator.IsFalse),
+          ),
         )
-
-      val booksPage =
-        bookDtoRepository.findAllByReadListId(
-          readList.id,
-          principal.user.id,
-          principal.user.getAuthorizedLibraryIds(null),
-          bookSearch,
-          pageable,
-          principal.user.restrictions,
-        )
+      val booksPage = bookDtoRepository.findAll(bookSearch, SearchContext(principal.user), pageable)
 
       val entries = booksPage.map { opdsGenerator.toOpdsPublicationDto(it) }
 
@@ -687,7 +702,6 @@ class Opds2Controller(
     return Pair(library, libraryIds)
   }
 
-  @PageAsQueryParam
   @GetMapping("series/{id}")
   fun getOneSeries(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -695,19 +709,23 @@ class Opds2Controller(
     @RequestParam(name = "tag", required = false) tag: String? = null,
     @Parameter(hidden = true) page: Pageable,
   ): FeedDto =
-    seriesDtoRepository.findByIdOrNull(id, "principal.user.id")?.let { series ->
-      contentRestrictionChecker.checkContentRestriction(principal.user, series)
+    seriesDtoRepository.findByIdOrNull(id, principal.user.id)?.let { series ->
+      contentRestrictionChecker.checkContentRestrictionSeries(principal.user, series)
 
       val bookSearch =
-        BookSearchWithReadProgress(
-          seriesIds = listOf(id),
-          mediaStatus = setOf(Media.Status.READY),
-          tags = if (tag != null) listOf(tag) else null,
-          deleted = false,
+        BookSearch(
+          SearchCondition.AllOfBook(
+            buildList {
+              add(SearchCondition.SeriesId(SearchOperator.Is(series.id)))
+              add(SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.READY)))
+              add(SearchCondition.Deleted(SearchOperator.IsFalse))
+              tag?.let { add(SearchCondition.Tag(SearchOperator.Is(it))) }
+            },
+          ),
         )
       val pageable = PageRequest.of(page.pageNumber, page.pageSize, Sort.by(Sort.Order.asc("metadata.numberSort")))
 
-      val entries = bookDtoRepository.findAll(bookSearch, principal.user.id, pageable, principal.user.restrictions).map { opdsGenerator.toOpdsPublicationDto(it) }
+      val entries = bookDtoRepository.findAll(bookSearch, SearchContext(principal.user), pageable).map { opdsGenerator.toOpdsPublicationDto(it) }
 
       val uriBuilder = uriBuilder("series/$id")
 
@@ -750,49 +768,62 @@ class Opds2Controller(
     @RequestParam(name = "query", required = false) query: String? = null,
   ): FeedDto {
     val pageable = PageRequest.of(0, 20, Sort.by("relevance"))
+    val queryTerms = query?.split("\\s+".toRegex())
 
     val resultsSeries =
-      seriesDtoRepository.findAll(
-        SeriesSearchWithReadProgress(
-          libraryIds = principal.user.getAuthorizedLibraryIds(null),
-          searchTerm = query,
-          oneshot = false,
-          deleted = false,
-        ),
-        principal.user.id,
-        pageable,
-        principal.user.restrictions,
-      ).map { it.toWPLinkDto() }
+      seriesDtoRepository
+        .findAll(
+          SeriesSearch(
+            SearchCondition.AllOfSeries(
+              buildList {
+                add(SearchCondition.OneShot(SearchOperator.IsFalse))
+                add(SearchCondition.Deleted(SearchOperator.IsFalse))
+                if (!queryTerms.isNullOrEmpty()) {
+                  add(SearchCondition.AllOfSeries(queryTerms.map { SearchCondition.Title(SearchOperator.Contains(it)) }))
+                }
+              },
+            ),
+          ),
+          SearchContext(principal.user),
+          pageable,
+        ).map { it.toWPLinkDto() }
 
     val resultsBooks =
-      bookDtoRepository.findAll(
-        BookSearchWithReadProgress(
-          libraryIds = principal.user.getAuthorizedLibraryIds(null),
-          searchTerm = query,
-          deleted = false,
-        ),
-        principal.user.id,
-        pageable,
-        principal.user.restrictions,
-      ).map { opdsGenerator.toOpdsPublicationDto(it) }
+      bookDtoRepository
+        .findAll(
+          BookSearch(
+            SearchCondition.AllOfBook(
+              buildList {
+                add(SearchCondition.Deleted(SearchOperator.IsFalse))
+                if (!queryTerms.isNullOrEmpty()) {
+                  add(SearchCondition.AllOfBook(queryTerms.map { SearchCondition.Title(SearchOperator.Contains(it)) }))
+                }
+              },
+            ),
+          ),
+          SearchContext(principal.user),
+          pageable,
+        ).map { opdsGenerator.toOpdsPublicationDto(it) }
 
     val resultsCollections =
-      collectionRepository.findAll(
-        principal.user.getAuthorizedLibraryIds(null),
-        principal.user.getAuthorizedLibraryIds(null),
-        query,
-        pageable,
-        principal.user.restrictions,
-      ).map { it.toWPLinkDto() }
+      collectionRepository
+        .findAll(
+          principal.user.getAuthorizedLibraryIds(null),
+          principal.user.getAuthorizedLibraryIds(null),
+          query,
+          pageable,
+          principal.user.restrictions,
+        ).map { it.toWPLinkDto() }
 
     val resultsReadLists =
-      readListRepository.findAll(
-        principal.user.getAuthorizedLibraryIds(null),
-        principal.user.getAuthorizedLibraryIds(null),
-        query,
-        pageable,
-        principal.user.restrictions,
-      ).map { it.toWPLinkDto() }
+      readListRepository
+        .findAll(
+          principal.user.getAuthorizedLibraryIds(null),
+          principal.user.getAuthorizedLibraryIds(null),
+          query,
+          pageable,
+          principal.user.restrictions,
+        ).map { it.toWPLinkDto() }
 
     return FeedDto(
       metadata =
@@ -823,7 +854,7 @@ class Opds2Controller(
     value = ["books/{bookId}/pages/{pageNumber}"],
     produces = [MediaType.ALL_VALUE],
   )
-  @PreAuthorize("hasRole('$ROLE_PAGE_STREAMING')")
+  @PreAuthorize("hasRole('PAGE_STREAMING')")
   fun getBookPage(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     request: ServletWebRequest,
@@ -835,8 +866,7 @@ class Opds2Controller(
     )
     @RequestParam(value = "convert", required = false)
     convertTo: String?,
-  ): ResponseEntity<ByteArray> =
-    commonBookController.getBookPageInternal(bookId, pageNumber, convertTo, request, principal, null)
+  ): ResponseEntity<ByteArray> = commonBookController.getBookPageInternal(bookId, pageNumber, convertTo, request, principal, null)
 
   @GetMapping(
     value = ["books/{bookId}/manifest"],
@@ -845,8 +875,7 @@ class Opds2Controller(
   fun getWebPubManifest(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable bookId: String,
-  ): WPPublicationDto =
-    commonBookController.getWebPubManifestInternal(principal, bookId, opdsGenerator)
+  ): WPPublicationDto = commonBookController.getWebPubManifestInternal(principal, bookId, opdsGenerator)
 
   @GetMapping(
     value = ["books/{bookId}/manifest/epub"],
@@ -855,8 +884,7 @@ class Opds2Controller(
   fun getWebPubManifestEpub(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable bookId: String,
-  ): WPPublicationDto =
-    commonBookController.getWebPubManifestEpubInternal(principal, bookId, opdsGenerator)
+  ): WPPublicationDto = commonBookController.getWebPubManifestEpubInternal(principal, bookId, opdsGenerator)
 
   @GetMapping(
     value = ["books/{bookId}/manifest/pdf"],
@@ -865,8 +893,7 @@ class Opds2Controller(
   fun getWebPubManifestPdf(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable bookId: String,
-  ): WPPublicationDto =
-    commonBookController.getWebPubManifestPdfInternal(principal, bookId, opdsGenerator)
+  ): WPPublicationDto = commonBookController.getWebPubManifestPdfInternal(principal, bookId, opdsGenerator)
 
   @GetMapping(
     value = ["books/{bookId}/manifest/divina"],
@@ -875,8 +902,7 @@ class Opds2Controller(
   fun getWebPubManifestDivina(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable bookId: String,
-  ): WPPublicationDto =
-    commonBookController.getWebPubManifestDivinaInternal(principal, bookId, opdsGenerator)
+  ): WPPublicationDto = commonBookController.getWebPubManifestDivinaInternal(principal, bookId, opdsGenerator)
 
   private fun Library.toWPLinkDto(): WPLinkDto =
     WPLinkDto(

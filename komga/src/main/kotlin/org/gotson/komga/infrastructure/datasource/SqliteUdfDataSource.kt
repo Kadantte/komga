@@ -2,6 +2,7 @@ package org.gotson.komga.infrastructure.datasource
 
 import com.ibm.icu.text.Collator
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.gotson.komga.infrastructure.unicode.Collators
 import org.gotson.komga.language.stripAccents
 import org.sqlite.Collation
 import org.sqlite.Function
@@ -14,22 +15,22 @@ private val log = KotlinLogging.logger {}
 class SqliteUdfDataSource : SQLiteDataSource() {
   companion object {
     const val UDF_STRIP_ACCENTS = "UDF_STRIP_ACCENTS"
+    const val COLLATION_UNICODE_1 = "COLLATION_UNICODE_1"
     const val COLLATION_UNICODE_3 = "COLLATION_UNICODE_3"
   }
 
-  override fun getConnection(): Connection =
-    super.getConnection().also { addAllUdf(it as SQLiteConnection) }
+  override fun getConnection(): Connection = super.getConnection().also { addAllUdf(it as SQLiteConnection) }
 
   override fun getConnection(
     username: String?,
     password: String?,
-  ): SQLiteConnection =
-    super.getConnection(username, password).also { addAllUdf(it) }
+  ): SQLiteConnection = super.getConnection(username, password).also { addAllUdf(it) }
 
   private fun addAllUdf(connection: SQLiteConnection) {
     createUdfRegexp(connection)
     createUdfStripAccents(connection)
-    createUnicode3Collation(connection)
+    createUnicodeCollation(connection, COLLATION_UNICODE_3, Collators.collator3)
+    createUnicodeCollation(connection, COLLATION_UNICODE_1, Collators.collator1)
   }
 
   private fun createUdfRegexp(connection: SQLiteConnection) {
@@ -63,18 +64,16 @@ class SqliteUdfDataSource : SQLiteDataSource() {
     )
   }
 
-  private fun createUnicode3Collation(connection: SQLiteConnection) {
-    log.debug { "Adding custom $COLLATION_UNICODE_3 collation" }
+  private fun createUnicodeCollation(
+    connection: SQLiteConnection,
+    collationName: String,
+    collator: Collator,
+  ) {
+    log.debug { "Adding custom $collationName collation" }
     Collation.create(
       connection,
-      COLLATION_UNICODE_3,
+      collationName,
       object : Collation() {
-        val collator =
-          Collator.getInstance().apply {
-            strength = Collator.TERTIARY
-            decomposition = Collator.CANONICAL_DECOMPOSITION
-          }
-
         override fun xCompare(
           str1: String,
           str2: String,

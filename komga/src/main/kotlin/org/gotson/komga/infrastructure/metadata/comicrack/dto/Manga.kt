@@ -2,7 +2,9 @@ package org.gotson.komga.infrastructure.metadata.comicrack.dto
 
 import com.fasterxml.jackson.annotation.JsonCreator
 
-enum class Manga(private val value: String) {
+enum class Manga(
+  private val value: String,
+) {
   UNKNOWN("Unknown"),
   NO("No"),
   YES("Yes"),
@@ -10,7 +12,7 @@ enum class Manga(private val value: String) {
   ;
 
   companion object {
-    private val map = values().associateBy(Manga::value)
+    private val map = entries.associateBy(Manga::value)
 
     @JvmStatic
     @JsonCreator

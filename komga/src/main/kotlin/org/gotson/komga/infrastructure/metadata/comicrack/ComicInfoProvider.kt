@@ -18,7 +18,6 @@ import org.gotson.komga.infrastructure.metadata.BookMetadataProvider
 import org.gotson.komga.infrastructure.metadata.SeriesMetadataFromBookProvider
 import org.gotson.komga.infrastructure.metadata.comicrack.dto.ComicInfo
 import org.gotson.komga.infrastructure.metadata.comicrack.dto.Manga
-import org.gotson.komga.language.stripAccents
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import java.net.URI
@@ -30,10 +29,11 @@ private const val COMIC_INFO = "ComicInfo.xml"
 
 @Service
 class ComicInfoProvider(
-  @Autowired(required = false) private val mapper: XmlMapper = XmlMapper(),
+  @param:Autowired(required = false) private val mapper: XmlMapper = XmlMapper(),
   private val bookAnalyzer: BookAnalyzer,
   private val isbnValidator: ISBNValidator,
-) : BookMetadataProvider, SeriesMetadataFromBookProvider {
+) : BookMetadataProvider,
+  SeriesMetadataFromBookProvider {
   override val capabilities =
     setOf(
       BookMetadataPatchCapability.TITLE,
@@ -89,16 +89,18 @@ class ComicInfoProvider(
         }
       }
 
-      val link =
-        comicInfo.web?.let {
-          try {
-            val uri = URI(it)
-            listOf(WebLink(uri.host, uri))
-          } catch (e: Exception) {
-            logger.error(e) { "Could not parse Web element as valid URI: $it" }
-            null
+      val links =
+        comicInfo.web
+          ?.split(" ")
+          ?.filter { it.isNotBlank() }
+          ?.mapNotNull {
+            try {
+              URI(it.trim()).let { uri -> WebLink(uri.host, uri) }
+            } catch (e: Exception) {
+              logger.error(e) { "Could not parse Web element as valid URI: $it" }
+              null
+            }
           }
-        }
 
       val tags = comicInfo.tags?.split(',')?.mapNotNull { it.trim().lowercase().ifBlank { null } }
 
@@ -112,7 +114,7 @@ class ComicInfoProvider(
         releaseDate = releaseDate,
         authors = authors.ifEmpty { null },
         readLists = readLists,
-        links = link,
+        links = links?.ifEmpty { null },
         tags = if (!tags.isNullOrEmpty()) tags.toSet() else null,
         isbn = isbn,
       )
@@ -139,7 +141,7 @@ class ComicInfoProvider(
 
       return SeriesMetadataPatch(
         title = series,
-        titleSort = series?.stripAccents(),
+        titleSort = series,
         status = null,
         summary = null,
         readingDirection = readingDirection,
@@ -148,7 +150,11 @@ class ComicInfoProvider(
         language = if (comicInfo.languageISO != null && BCP47TagValidator.isValid(comicInfo.languageISO!!)) BCP47TagValidator.normalize(comicInfo.languageISO!!) else null,
         genres = if (!genres.isNullOrEmpty()) genres.toSet() else null,
         totalBookCount = comicInfo.count,
-        collections = comicInfo.seriesGroup?.split(',')?.mapNotNull { it.trim().ifBlank { null } }?.toSet() ?: emptySet(),
+        collections =
+          comicInfo.seriesGroup
+            ?.split(',')
+            ?.mapNotNull { it.trim().ifBlank { null } }
+            ?.toSet() ?: emptySet(),
       )
     }
     return null

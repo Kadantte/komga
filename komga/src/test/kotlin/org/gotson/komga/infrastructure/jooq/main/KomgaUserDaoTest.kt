@@ -5,6 +5,7 @@ import org.gotson.komga.domain.model.AgeRestriction
 import org.gotson.komga.domain.model.AllowExclude
 import org.gotson.komga.domain.model.ContentRestrictions
 import org.gotson.komga.domain.model.KomgaUser
+import org.gotson.komga.domain.model.UserRoles
 import org.gotson.komga.domain.model.makeLibrary
 import org.gotson.komga.domain.persistence.LibraryRepository
 import org.gotson.komga.infrastructure.jooq.offset
@@ -46,7 +47,6 @@ class KomgaUserDaoTest(
       KomgaUser(
         email = "user@example.org",
         password = "password",
-        roleAdmin = false,
         sharedLibrariesIds = setOf(library.id),
         sharedAllLibraries = false,
       )
@@ -60,7 +60,7 @@ class KomgaUserDaoTest(
       assertThat(lastModifiedDate).isCloseTo(now, offset)
       assertThat(email).isEqualTo("user@example.org")
       assertThat(password).isEqualTo("password")
-      assertThat(roleAdmin).isFalse
+      assertThat(roles).containsExactlyInAnyOrder(UserRoles.FILE_DOWNLOAD, UserRoles.PAGE_STREAMING)
       assertThat(sharedLibrariesIds).containsExactly(library.id)
       assertThat(sharedAllLibraries).isFalse
       assertThat(restrictions.ageRestriction).isNull()
@@ -75,7 +75,6 @@ class KomgaUserDaoTest(
       KomgaUser(
         email = "user@example.org",
         password = "password",
-        roleAdmin = false,
         sharedLibrariesIds = setOf(library.id),
         sharedAllLibraries = false,
         restrictions =
@@ -100,7 +99,7 @@ class KomgaUserDaoTest(
       created.copy(
         email = "user2@example.org",
         password = "password2",
-        roleAdmin = true,
+        roles = setOf(UserRoles.ADMIN, UserRoles.FILE_DOWNLOAD, UserRoles.PAGE_STREAMING, UserRoles.KOBO_SYNC),
         sharedLibrariesIds = emptySet(),
         sharedAllLibraries = true,
         restrictions =
@@ -122,7 +121,7 @@ class KomgaUserDaoTest(
         .isNotEqualTo(modified.createdDate)
       assertThat(email).isEqualTo("user2@example.org")
       assertThat(password).isEqualTo("password2")
-      assertThat(roleAdmin).isTrue
+      assertThat(roles).containsExactlyInAnyOrder(UserRoles.ADMIN, UserRoles.FILE_DOWNLOAD, UserRoles.PAGE_STREAMING, UserRoles.KOBO_SYNC)
       assertThat(sharedLibrariesIds).isEmpty()
       assertThat(sharedAllLibraries).isTrue
       assertThat(restrictions.ageRestriction).isNotNull
@@ -142,8 +141,8 @@ class KomgaUserDaoTest(
 
   @Test
   fun `given multiple users when saving then they are persisted`() {
-    komgaUserDao.insert(KomgaUser("user1@example.org", "p", false))
-    komgaUserDao.insert(KomgaUser("user2@example.org", "p", true))
+    komgaUserDao.insert(KomgaUser("user1@example.org", "p"))
+    komgaUserDao.insert(KomgaUser("user2@example.org", "p"))
 
     val users = komgaUserDao.findAll()
 
@@ -156,8 +155,8 @@ class KomgaUserDaoTest(
 
   @Test
   fun `given some users when counting then proper count is returned`() {
-    komgaUserDao.insert(KomgaUser("user1@example.org", "p", false))
-    komgaUserDao.insert(KomgaUser("user2@example.org", "p", true))
+    komgaUserDao.insert(KomgaUser("user1@example.org", "p"))
+    komgaUserDao.insert(KomgaUser("user2@example.org", "p"))
 
     val count = komgaUserDao.count()
 
@@ -166,7 +165,7 @@ class KomgaUserDaoTest(
 
   @Test
   fun `given existing user when finding by id then user is returned`() {
-    val existing = KomgaUser("user1@example.org", "p", false)
+    val existing = KomgaUser("user1@example.org", "p")
     komgaUserDao.insert(existing)
 
     val user = komgaUserDao.findByIdOrNull(existing.id)
@@ -183,7 +182,7 @@ class KomgaUserDaoTest(
 
   @Test
   fun `given existing user when deleting then user is deleted`() {
-    val existing = KomgaUser("user1@example.org", "p", false)
+    val existing = KomgaUser("user1@example.org", "p")
     komgaUserDao.insert(existing)
 
     komgaUserDao.delete(existing.id)
@@ -194,7 +193,7 @@ class KomgaUserDaoTest(
   @Test
   fun `given users when checking if exists by email then return true or false`() {
     komgaUserDao.insert(
-      KomgaUser("user1@example.org", "p", false),
+      KomgaUser("user1@example.org", "p"),
     )
 
     val exists = komgaUserDao.existsByEmailIgnoreCase("USER1@EXAMPLE.ORG")
@@ -207,7 +206,7 @@ class KomgaUserDaoTest(
   @Test
   fun `given users when finding by email then return user`() {
     komgaUserDao.insert(
-      KomgaUser("user1@example.org", "p", false),
+      KomgaUser("user1@example.org", "p"),
     )
 
     val found = komgaUserDao.findByEmailIgnoreCaseOrNull("USER1@EXAMPLE.ORG")
@@ -216,5 +215,22 @@ class KomgaUserDaoTest(
     assertThat(found).isNotNull
     assertThat(found?.email).isEqualTo("user1@example.org")
     assertThat(notFound).isNull()
+  }
+
+  @Test
+  fun `given user when saving announcement as read then it works`() {
+    val user = KomgaUser("user1@example.org", "p")
+    komgaUserDao.insert(user)
+
+    assertThat(komgaUserDao.findAnnouncementIdsReadByUserId(user.id)).isEmpty()
+
+    komgaUserDao.saveAnnouncementIdsRead(user, setOf("1"))
+    assertThat(komgaUserDao.findAnnouncementIdsReadByUserId(user.id)).containsExactlyInAnyOrder("1")
+
+    komgaUserDao.saveAnnouncementIdsRead(user, setOf("2"))
+    assertThat(komgaUserDao.findAnnouncementIdsReadByUserId(user.id)).containsExactlyInAnyOrder("1", "2")
+
+    komgaUserDao.saveAnnouncementIdsRead(user, setOf("2"))
+    assertThat(komgaUserDao.findAnnouncementIdsReadByUserId(user.id)).containsExactlyInAnyOrder("1", "2")
   }
 }

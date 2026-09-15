@@ -14,8 +14,6 @@ interface MediaRepository {
     pageHashing: Int,
   ): Collection<String>
 
-  fun getPagesSize(bookId: String): Int
-
   fun getPagesSizes(bookIds: Collection<String>): Collection<Pair<String, Int>>
 
   fun findExtensionByIdOrNull(bookId: String): MediaExtension?
@@ -26,9 +24,17 @@ interface MediaRepository {
 
   fun update(media: Media)
 
+  /**
+   * Performs a full copy of a Media, including MediaExtension, pages, and files.
+   */
+  fun copy(
+    fromBookId: String,
+    toBookId: String,
+  )
+
   fun delete(bookId: String)
 
-  fun deleteByBookIds(bookIds: Collection<String>)
+  fun delete(bookIds: Collection<String>)
 
   fun count(): Long
 }

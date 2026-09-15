@@ -12,12 +12,15 @@ logging:
   level:
     org.apache.activemq.audit: WARN
     org.apache.fontbox.cff.Type1CharString: ERROR
+    org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer: ERROR
 
 komga:
   database:
     file: \${komga.config-dir}/database.sqlite
   lucene:
     data-directory: \${komga.config-dir}/lucene
+  fonts:
+    data-directory: \${komga.config-dir}/fonts
   config-dir: \${user.home}/.komga
   tasks-db:
     file: \${komga.config-dir}/tasks.sqlite
@@ -37,23 +40,23 @@ spring:
   mvc:
     async:
       request-timeout: 1h
-  # Deprecated - to remove along with ArtemisCleanup.kt
-  artemis:
-    broker-url: tcp://localhost:18515
-    embedded:
-      persistent: true
-      data-directory: \${komga.config-dir}/artemis
   web:
     resources:
       add-mappings: false
   jackson:
     deserialization:
       FAIL_ON_NULL_FOR_PRIMITIVES: true
+    mapper:
+      accept-case-insensitive-properties: true
+      accept-case-insensitive-values: true
   config:
     import:
       - "optional:file:\${komga.config-dir}/application.yml"
       - "optional:file:\${komga.config-dir}/application.yaml"
       - "optional:file:\${komga.config-dir}/application.properties"
+  http:
+    codecs:
+      max-in-memory-size: 10MB
 
 server:
   servlet.session.timeout: 7d
@@ -62,6 +65,12 @@ server:
   error:
     include-message: always
   port: 25600
+  tomcat:
+    relaxed-query-chars:
+      - '{'
+      - '}'
+      - '['
+      - ']'
 
 management:
   endpoints.web.exposure.include: "*"
@@ -76,7 +85,7 @@ management:
       roles: ADMIN
       show-details: when_authorized
     shutdown:
-      enabled: true
+      access: unrestricted
   info:
     java:
       enabled: true
@@ -88,12 +97,7 @@ management:
         enabled: true
         step: 24h
 springdoc:
-  group-configs:
-    - group: REST API
-      paths-to-match: /api/**
-    - group: OPDS
-      paths-to-match: /opds/**
   swagger-ui:
-    groups-order: desc
-    operations-sorter: alpha
     disable-swagger-default-url: true
+  paths-to-match: "/api/**"
+  writer-with-order-by-keys: true

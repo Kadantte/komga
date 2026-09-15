@@ -31,8 +31,7 @@ data class BookDto(
   val oneshot: Boolean,
 )
 
-fun BookDto.restrictUrl(restrict: Boolean) =
-  if (restrict) copy(url = FilenameUtils.getName(url)) else this
+fun BookDto.restrictUrl(restrict: Boolean) = if (restrict) copy(url = FilenameUtils.getName(url)) else this
 
 data class MediaDto(
   val status: String,
@@ -40,6 +39,7 @@ data class MediaDto(
   val pagesCount: Int,
   val comment: String,
   val epubDivinaCompatible: Boolean,
+  val epubIsKepub: Boolean,
 ) {
   val mediaProfile: String by lazy { MediaType.fromMediaType(mediaType)?.profile?.name ?: "" }
 }

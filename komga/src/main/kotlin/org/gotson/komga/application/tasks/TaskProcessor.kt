@@ -2,6 +2,7 @@ package org.gotson.komga.application.tasks
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
+import org.gotson.komga.infrastructure.configuration.SettingChangedEvent
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.boot.task.ThreadPoolTaskExecutorBuilder
@@ -34,7 +35,7 @@ class TaskProcessor(
     processTasks = true
   }
 
-  @EventListener(TaskPoolSizeChangedEvent::class)
+  @EventListener(SettingChangedEvent.TaskPoolSize::class)
   fun taskPoolSizeChanged() {
     executor.corePoolSize = settingsProvider.taskPoolSize
   }
@@ -47,8 +48,9 @@ class TaskProcessor(
         executor.execute { takeAndProcess() }
       } else {
         // fan out while threads are available
-        while (tasksRepository.hasAvailable() && executor.activeCount < executor.corePoolSize)
+        while (tasksRepository.hasAvailable() && executor.activeCount < executor.corePoolSize) {
           executor.execute { takeAndProcess() }
+        }
       }
     } else {
       logger.debug { "Not processing tasks" }

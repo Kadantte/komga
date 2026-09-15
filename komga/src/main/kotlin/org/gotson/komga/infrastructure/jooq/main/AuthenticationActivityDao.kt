@@ -3,6 +3,7 @@ package org.gotson.komga.infrastructure.jooq.main
 import org.gotson.komga.domain.model.AuthenticationActivity
 import org.gotson.komga.domain.model.KomgaUser
 import org.gotson.komga.domain.persistence.AuthenticationActivityRepository
+import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
 import org.gotson.komga.infrastructure.jooq.toOrderBy
 import org.gotson.komga.jooq.main.Tables
 import org.gotson.komga.jooq.main.tables.records.AuthenticationActivityRecord
@@ -10,6 +11,7 @@ import org.gotson.komga.language.toCurrentTimeZone
 import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
@@ -20,8 +22,10 @@ import java.time.LocalDateTime
 
 @Component
 class AuthenticationActivityDao(
-  private val dsl: DSLContext,
-) : AuthenticationActivityRepository {
+  dslRW: DSLContext,
+  @Qualifier("dslContextRO") dslRO: DSLContext,
+) : SplitDslDaoBase(dslRW, dslRO),
+  AuthenticationActivityRepository {
   private val aa = Tables.AUTHENTICATION_ACTIVITY
 
   private val sorts =
@@ -48,10 +52,15 @@ class AuthenticationActivityDao(
     return findAll(conditions, pageable)
   }
 
-  override fun findMostRecentByUser(user: KomgaUser): AuthenticationActivity? =
-    dsl.selectFrom(aa)
+  override fun findMostRecentByUser(
+    user: KomgaUser,
+    apiKeyId: String?,
+  ): AuthenticationActivity? =
+    dslRO
+      .selectFrom(aa)
       .where(aa.USER_ID.eq(user.id))
       .or(aa.EMAIL.eq(user.email))
+      .apply { apiKeyId?.let { and(aa.API_KEY_ID.eq(it)) } }
       .orderBy(aa.DATE_TIME.desc())
       .limit(1)
       .fetchOne()
@@ -61,12 +70,13 @@ class AuthenticationActivityDao(
     conditions: Condition,
     pageable: Pageable,
   ): PageImpl<AuthenticationActivity> {
-    val count = dsl.fetchCount(aa, conditions)
+    val count = dslRO.fetchCount(aa, conditions)
 
     val orderBy = pageable.sort.toOrderBy(sorts)
 
     val items =
-      dsl.selectFrom(aa)
+      dslRO
+        .selectFrom(aa)
         .where(conditions)
         .orderBy(orderBy)
         .apply { if (pageable.isPaged) limit(pageable.pageSize).offset(pageable.offset) }
@@ -85,20 +95,23 @@ class AuthenticationActivityDao(
   }
 
   override fun insert(activity: AuthenticationActivity) {
-    dsl.insertInto(aa, aa.USER_ID, aa.EMAIL, aa.IP, aa.USER_AGENT, aa.SUCCESS, aa.ERROR, aa.SOURCE)
-      .values(activity.userId, activity.email, activity.ip, activity.userAgent, activity.success, activity.error, activity.source)
+    dslRW
+      .insertInto(aa, aa.USER_ID, aa.EMAIL, aa.API_KEY_ID, aa.API_KEY_COMMENT, aa.IP, aa.USER_AGENT, aa.SUCCESS, aa.ERROR, aa.SOURCE)
+      .values(activity.userId, activity.email, activity.apiKeyId, activity.apiKeyComment, activity.ip, activity.userAgent, activity.success, activity.error, activity.source)
       .execute()
   }
 
   override fun deleteByUser(user: KomgaUser) {
-    dsl.deleteFrom(aa)
+    dslRW
+      .deleteFrom(aa)
       .where(aa.USER_ID.eq(user.id))
       .or(aa.EMAIL.eq(user.email))
       .execute()
   }
 
   override fun deleteOlderThan(dateTime: LocalDateTime) {
-    dsl.deleteFrom(aa)
+    dslRW
+      .deleteFrom(aa)
       .where(aa.DATE_TIME.lt(dateTime))
       .execute()
   }
@@ -107,6 +120,8 @@ class AuthenticationActivityDao(
     AuthenticationActivity(
       userId = userId,
       email = email,
+      apiKeyId = apiKeyId,
+      apiKeyComment = apiKeyComment,
       ip = ip,
       userAgent = userAgent,
       success = success,

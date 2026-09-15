@@ -22,6 +22,9 @@ Komga is a media server for your comics, mangas, BDs, magazines and eBooks.
 - Webreader with multiple reading modes
 - Manage multiple users, with per-library access control, age restrictions, and labels restrictions
 - Offers a REST API, many community tools and scripts can interact with Komga
+- OPDS v1 and v2 support
+- Kobo Sync with your Kobo eReader
+- KOReader Sync
 - Download book files, whole series, or read lists
 - Duplicate files detection
 - Duplicate pages detection and removal
@@ -44,9 +47,15 @@ Check the [development guidelines](./DEVELOPING.md).
 
 [![Translation status](https://hosted.weblate.org/widgets/komga/-/webui/horizontal-auto.svg)](https://hosted.weblate.org/engage/komga/)
 
-## Sponsors
+## Powered by
 
-[![Jetbrains_logo](./.github/readme-images/sponsors-jetbrains.png)](https://www.jetbrains.com/?from=Komga)
+[![Jetbrains_logo](./.github/readme-images/jetbrains.svg)](https://www.jetbrains.com/?from=Komga)
+
+Thanks to [JetBrains](https://www.jetbrains.com/?from=Komga) for providing the development environment that helps us develop Komga.
+
+[![Chromatic logo](https://user-images.githubusercontent.com/321738/84662277-e3db4f80-af1b-11ea-88f5-91d67a5e59f6.png)](https://www.chromatic.com)
+
+Thanks to [Chromatic](https://www.chromatic.com/) for providing the visual testing platform that helps us review UI changes and catch visual regressions.
 
 ## Credits
 

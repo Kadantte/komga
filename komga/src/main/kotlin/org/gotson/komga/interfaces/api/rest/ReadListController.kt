@@ -1,6 +1,7 @@
 package org.gotson.komga.interfaces.api.rest
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
 import io.swagger.v3.oas.annotations.media.Schema
@@ -11,17 +12,18 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
 import org.apache.commons.io.IOUtils
 import org.gotson.komga.domain.model.Author
-import org.gotson.komga.domain.model.BookSearchWithReadProgress
+import org.gotson.komga.domain.model.BookSearch
 import org.gotson.komga.domain.model.CodedException
 import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.domain.model.DomainEvent
 import org.gotson.komga.domain.model.DuplicateNameException
 import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.MediaType.ZIP
-import org.gotson.komga.domain.model.ROLE_ADMIN
-import org.gotson.komga.domain.model.ROLE_FILE_DOWNLOAD
 import org.gotson.komga.domain.model.ReadList
 import org.gotson.komga.domain.model.ReadStatus
+import org.gotson.komga.domain.model.SearchCondition
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.model.ThumbnailReadList
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.ReadListRepository
@@ -31,9 +33,10 @@ import org.gotson.komga.domain.service.ReadListLifecycle
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.openapi.AuthorsAsQueryParam
+import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
+import org.gotson.komga.infrastructure.openapi.PageableWithoutSortAsQueryParam
 import org.gotson.komga.infrastructure.security.KomgaPrincipal
-import org.gotson.komga.infrastructure.swagger.AuthorsAsQueryParam
-import org.gotson.komga.infrastructure.swagger.PageableWithoutSortAsQueryParam
 import org.gotson.komga.infrastructure.web.Authors
 import org.gotson.komga.interfaces.api.persistence.BookDtoRepository
 import org.gotson.komga.interfaces.api.persistence.ReadProgressDtoRepository
@@ -97,9 +100,10 @@ class ReadListController(
   private val bookLifecycle: BookLifecycle,
   private val eventPublisher: ApplicationEventPublisher,
 ) {
+  @Operation(summary = "List readlists", tags = [OpenApiConfiguration.TagNames.READLISTS])
   @PageableWithoutSortAsQueryParam
   @GetMapping
-  fun getAll(
+  fun getReadLists(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "search", required = false) searchTerm: String?,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>?,
@@ -123,19 +127,23 @@ class ReadListController(
           sort,
         )
 
-    return readListRepository.findAll(principal.user.getAuthorizedLibraryIds(libraryIds), principal.user.getAuthorizedLibraryIds(null), searchTerm, pageRequest, principal.user.restrictions)
+    return readListRepository
+      .findAll(principal.user.getAuthorizedLibraryIds(libraryIds), principal.user.getAuthorizedLibraryIds(null), searchTerm, pageRequest, principal.user.restrictions)
       .map { it.toDto() }
   }
 
+  @Operation(summary = "Get readlist details", tags = [OpenApiConfiguration.TagNames.READLISTS])
   @GetMapping("{id}")
-  fun getOne(
+  fun getReadListById(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable id: String,
   ): ReadListDto =
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)
+    readListRepository
+      .findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)
       ?.toDto()
       ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
+  @Operation(summary = "Get readlist's poster image", tags = [OpenApiConfiguration.TagNames.READLIST_POSTER])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])
   @GetMapping(value = ["{id}/thumbnail"], produces = [MediaType.IMAGE_JPEG_VALUE])
   fun getReadListThumbnail(
@@ -143,12 +151,14 @@ class ReadListController(
     @PathVariable id: String,
   ): ResponseEntity<ByteArray> {
     readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
-      return ResponseEntity.ok()
+      return ResponseEntity
+        .ok()
         .cacheControl(CacheControl.maxAge(1, TimeUnit.HOURS).cachePrivate())
         .body(readListLifecycle.getThumbnailBytes(it))
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Get readlist poster image", tags = [OpenApiConfiguration.TagNames.READLIST_POSTER])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])
   @GetMapping(value = ["{id}/thumbnails/{thumbnailId}"], produces = [MediaType.IMAGE_JPEG_VALUE])
   fun getReadListThumbnailById(
@@ -157,11 +167,14 @@ class ReadListController(
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ): ByteArray {
     readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
-      return readListLifecycle.getThumbnailBytes(thumbnailId)
-        ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+      thumbnailReadListRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.readListId != it.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        return poster.thumbnail
+      } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "List readlist's posters", tags = [OpenApiConfiguration.TagNames.READLIST_POSTER])
   @GetMapping(value = ["{id}/thumbnails"], produces = [MediaType.APPLICATION_JSON_VALUE])
   fun getReadListThumbnails(
     @AuthenticationPrincipal principal: KomgaPrincipal,
@@ -172,8 +185,9 @@ class ReadListController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Add readlist poster", tags = [OpenApiConfiguration.TagNames.READLIST_POSTER])
   @PostMapping(value = ["{id}/thumbnails"], consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   fun addUserUploadedReadListThumbnail(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id") id: String,
@@ -186,73 +200,81 @@ class ReadListController(
       if (!contentDetector.isImage(mediaType))
         throw ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
 
-      return readListLifecycle.addThumbnail(
-        ThumbnailReadList(
-          readListId = readList.id,
-          thumbnail = file.bytes,
-          type = ThumbnailReadList.Type.USER_UPLOADED,
-          selected = selected,
-          fileSize = file.bytes.size.toLong(),
-          mediaType = mediaType,
-          dimension = imageAnalyzer.getDimension(file.inputStream.buffered()) ?: Dimension(0, 0),
-        ),
-      ).toDto()
+      return readListLifecycle
+        .addThumbnail(
+          ThumbnailReadList(
+            readListId = readList.id,
+            thumbnail = file.bytes,
+            type = ThumbnailReadList.Type.USER_UPLOADED,
+            selected = selected,
+            fileSize = file.bytes.size.toLong(),
+            mediaType = mediaType,
+            dimension = imageAnalyzer.getDimension(file.inputStream.buffered()) ?: Dimension(0, 0),
+          ),
+        ).toDto()
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Mark readlist poster as selected", tags = [OpenApiConfiguration.TagNames.READLIST_POSTER])
   @PutMapping("{id}/thumbnails/{thumbnailId}/selected")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  fun markSelectedReadListThumbnail(
+  fun markReadListThumbnailSelected(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id") id: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ) {
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
-      thumbnailReadListRepository.findByIdOrNull(thumbnailId)?.let {
-        readListLifecycle.markSelectedThumbnail(it)
-        eventPublisher.publishEvent(DomainEvent.ThumbnailReadListAdded(it.copy(selected = true)))
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let { readList ->
+      thumbnailReadListRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.readListId != readList.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        readListLifecycle.markSelectedThumbnail(poster)
+        eventPublisher.publishEvent(DomainEvent.ThumbnailReadListAdded(poster.copy(selected = true)))
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Delete readlist poster", tags = [OpenApiConfiguration.TagNames.READLIST_POSTER])
   @DeleteMapping("{id}/thumbnails/{thumbnailId}")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
   fun deleteUserUploadedReadListThumbnail(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "id") id: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ) {
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
-      thumbnailReadListRepository.findByIdOrNull(thumbnailId)?.let {
-        readListLifecycle.deleteThumbnail(it)
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let { readList ->
+      thumbnailReadListRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.readListId != readList.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        readListLifecycle.deleteThumbnail(poster)
       } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Create readlist", tags = [OpenApiConfiguration.TagNames.READLISTS])
   @PostMapping
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
-  fun addOne(
+  @PreAuthorize("hasRole('ADMIN')")
+  fun createReadList(
     @Valid @RequestBody
     readList: ReadListCreationDto,
   ): ReadListDto =
     try {
-      readListLifecycle.addReadList(
-        ReadList(
-          name = readList.name,
-          summary = readList.summary,
-          ordered = readList.ordered,
-          bookIds = readList.bookIds.toIndexedMap(),
-        ),
-      ).toDto()
+      readListLifecycle
+        .addReadList(
+          ReadList(
+            name = readList.name,
+            summary = readList.summary,
+            ordered = readList.ordered,
+            bookIds = readList.bookIds.toIndexedMap(),
+          ),
+        ).toDto()
     } catch (e: DuplicateNameException) {
       throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
     }
 
-  @PostMapping("match/comicrack")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
-  fun matchFromComicRackList(
+  @Operation(summary = "Match ComicRack list", tags = [OpenApiConfiguration.TagNames.COMICRACK])
+  @PostMapping("match/comicrack", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+  @PreAuthorize("hasRole('ADMIN')")
+  fun matchComicRackList(
     @RequestParam("file") file: MultipartFile,
   ): ReadListRequestMatchDto =
     try {
@@ -261,10 +283,11 @@ class ReadListController(
       throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.code)
     }
 
+  @Operation(summary = "Update readlist", tags = [OpenApiConfiguration.TagNames.READLISTS])
   @PatchMapping("{id}")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun updateOne(
+  fun updateReadListById(
     @PathVariable id: String,
     @Valid @RequestBody
     readList: ReadListUpdateDto,
@@ -285,10 +308,11 @@ class ReadListController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Delete readlist", tags = [OpenApiConfiguration.TagNames.READLISTS])
   @DeleteMapping("{id}")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun deleteOne(
+  fun deleteReadListById(
     @PathVariable id: String,
   ) {
     readListRepository.findByIdOrNull(id)?.let {
@@ -296,10 +320,11 @@ class ReadListController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "List readlist's books", tags = [OpenApiConfiguration.TagNames.READLIST_BOOKS])
   @PageableWithoutSortAsQueryParam
   @AuthorsAsQueryParam
   @GetMapping("{id}/books")
-  fun getBooksForReadList(
+  fun getBooksByReadListId(
     @PathVariable id: String,
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>?,
@@ -311,7 +336,7 @@ class ReadListController(
     @Parameter(hidden = true) @Authors authors: List<Author>?,
     @Parameter(hidden = true) page: Pageable,
   ): Page<BookDto> =
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let { readList ->
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let { readList ->
       val sort =
         if (readList.ordered)
           Sort.by(Sort.Order.asc("readList.number"))
@@ -329,86 +354,83 @@ class ReadListController(
           )
 
       val bookSearch =
-        BookSearchWithReadProgress(
-          libraryIds = principal.user.getAuthorizedLibraryIds(libraryIds),
-          readStatus = readStatus,
-          mediaStatus = mediaStatus,
-          deleted = deleted,
-          tags = tags,
-          authors = authors,
+        BookSearch(
+          SearchCondition.AllOfBook(
+            buildList {
+              add(SearchCondition.ReadListId(SearchOperator.Is(readList.id)))
+              if (!libraryIds.isNullOrEmpty()) add(SearchCondition.AnyOfBook(libraryIds.map { SearchCondition.LibraryId(SearchOperator.Is(it)) }))
+              if (!readStatus.isNullOrEmpty()) add(SearchCondition.AnyOfBook(readStatus.map { SearchCondition.ReadStatus(SearchOperator.Is(it)) }))
+              if (!mediaStatus.isNullOrEmpty()) add(SearchCondition.AnyOfBook(mediaStatus.map { SearchCondition.MediaStatus(SearchOperator.Is(it)) }))
+              if (!tags.isNullOrEmpty()) add(SearchCondition.AnyOfBook(tags.map { SearchCondition.Tag(SearchOperator.Is(it)) }))
+              if (!authors.isNullOrEmpty()) add(SearchCondition.AnyOfBook(authors.map { SearchCondition.Author(SearchOperator.Is(SearchCondition.AuthorMatch(it.name, it.role))) }))
+              deleted?.let { add(SearchCondition.Deleted(if (deleted) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+            },
+          ),
         )
-
-      bookDtoRepository.findAllByReadListId(
-        readList.id,
-        principal.user.id,
-        principal.user.getAuthorizedLibraryIds(null),
-        bookSearch,
-        pageRequest,
-        principal.user.restrictions,
-      )
-        .map { it.restrictUrl(!principal.user.roleAdmin) }
+      bookDtoRepository
+        .findAll(bookSearch, SearchContext(principal.user), pageRequest)
+        .map { it.restrictUrl(!principal.user.isAdmin) }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
+  @Operation(summary = "Get previous book in readlist", tags = [OpenApiConfiguration.TagNames.READLIST_BOOKS])
   @GetMapping("{id}/books/{bookId}/previous")
-  fun getBookSiblingPrevious(
+  fun getBookSiblingPreviousInReadList(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable id: String,
     @PathVariable bookId: String,
   ): BookDto =
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let {
-      bookDtoRepository.findPreviousInReadListOrNull(
-        it,
-        bookId,
-        principal.user.id,
-        principal.user.getAuthorizedLibraryIds(null),
-        principal.user.restrictions,
-      )
-        ?.restrictUrl(!principal.user.roleAdmin)
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
+      bookDtoRepository
+        .findPreviousInReadListOrNull(
+          it,
+          bookId,
+          principal.user.id,
+          principal.user.getAuthorizedLibraryIds(null),
+          principal.user.restrictions,
+        )?.restrictUrl(!principal.user.isAdmin)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
+  @Operation(summary = "Get next book in readlist", tags = [OpenApiConfiguration.TagNames.READLIST_BOOKS])
   @GetMapping("{id}/books/{bookId}/next")
-  fun getBookSiblingNext(
+  fun getBookSiblingNextInReadList(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable id: String,
     @PathVariable bookId: String,
   ): BookDto =
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let {
-      bookDtoRepository.findNextInReadListOrNull(
-        it,
-        bookId,
-        principal.user.id,
-        principal.user.getAuthorizedLibraryIds(null),
-        principal.user.restrictions,
-      )
-        ?.restrictUrl(!principal.user.roleAdmin)
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let {
+      bookDtoRepository
+        .findNextInReadListOrNull(
+          it,
+          bookId,
+          principal.user.id,
+          principal.user.getAuthorizedLibraryIds(null),
+          principal.user.restrictions,
+        )?.restrictUrl(!principal.user.isAdmin)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
+  @Operation(summary = "Get readlist read progress (Mihon)", description = "Mihon specific, due to how read progress is handled in Mihon.", tags = [OpenApiConfiguration.TagNames.MIHON])
   @GetMapping("{id}/read-progress/tachiyomi")
-  fun getReadProgress(
+  fun getMihonReadProgressByReadListId(
     @PathVariable id: String,
     @AuthenticationPrincipal principal: KomgaPrincipal,
   ): TachiyomiReadProgressDto =
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let { readList ->
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let { readList ->
       readProgressDtoRepository.findProgressByReadList(readList.id, principal.user.id)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
+  @Operation(summary = "Update readlist read progress (Mihon)", description = "Mihon specific, due to how read progress is handled in Mihon.", tags = [OpenApiConfiguration.TagNames.MIHON])
   @PutMapping("{id}/read-progress/tachiyomi")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun markReadProgressTachiyomi(
+  fun updateMihonReadProgressByReadListId(
     @PathVariable id: String,
     @Valid @RequestBody
     readProgress: TachiyomiReadProgressUpdateDto,
     @AuthenticationPrincipal principal: KomgaPrincipal,
   ) {
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let { readList ->
-      bookDtoRepository.findAllByReadListId(
-        readList.id,
-        principal.user.id,
-        principal.user.getAuthorizedLibraryIds(null),
-        BookSearchWithReadProgress(),
-        UnpagedSorted(Sort.by(Sort.Order.asc("readList.number"))),
-        principal.user.restrictions,
-      ).filterIndexed { index, _ -> index < readProgress.lastBookRead }
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let { readList ->
+      bookDtoRepository
+        .findAll(BookSearch(SearchCondition.ReadListId(SearchOperator.Is(readList.id))), SearchContext(principal.user), UnpagedSorted(Sort.by(Sort.Order.asc("readList.number"))))
+        .filterIndexed { index, _ -> index < readProgress.lastBookRead }
         .forEach { book ->
           if (book.readProgress?.completed != true)
             bookLifecycle.markReadProgressCompleted(book.id, principal.user)
@@ -416,13 +438,14 @@ class ReadListController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Download readlist", description = "Download the whole readlist as a ZIP file.", tags = [OpenApiConfiguration.TagNames.READLISTS])
   @GetMapping("{id}/file", produces = [MediaType.APPLICATION_OCTET_STREAM_VALUE])
-  @PreAuthorize("hasRole('$ROLE_FILE_DOWNLOAD')")
-  fun getReadListFile(
+  @PreAuthorize("hasRole('FILE_DOWNLOAD')")
+  fun downloadReadListAsZip(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable id: String,
   ): ResponseEntity<StreamingResponseBody> {
-    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null))?.let { readList ->
+    readListRepository.findByIdOrNull(id, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)?.let { readList ->
 
       val books =
         readList.bookIds
@@ -452,16 +475,17 @@ class ReadListController(
           }
         }
 
-      return ResponseEntity.ok()
+      return ResponseEntity
+        .ok()
         .headers(
           HttpHeaders().apply {
             contentDisposition =
-              ContentDisposition.builder("attachment")
+              ContentDisposition
+                .builder("attachment")
                 .filename(readList.name + ".zip", UTF_8)
                 .build()
           },
-        )
-        .contentType(MediaType.parseMediaType(ZIP.type))
+        ).contentType(MediaType.parseMediaType(ZIP.type))
         .body(streamingResponse)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }

@@ -113,13 +113,13 @@ class ReadListLifecycle(
 
   fun deleteEmptyReadLists() {
     logger.info { "Deleting empty read lists" }
+    val toDelete = readListRepository.findAllEmpty()
     transactionTemplate.executeWithoutResult {
-      val toDelete = readListRepository.findAllEmpty()
       thumbnailReadListRepository.deleteByReadListIds(toDelete.map { it.id })
       readListRepository.delete(toDelete.map { it.id })
-
-      toDelete.forEach { eventPublisher.publishEvent(DomainEvent.ReadListDeleted(it)) }
     }
+
+    toDelete.forEach { eventPublisher.publishEvent(DomainEvent.ReadListDeleted(it)) }
   }
 
   fun addThumbnail(thumbnail: ThumbnailReadList): ThumbnailReadList {
@@ -146,9 +146,6 @@ class ReadListLifecycle(
     thumbnailsHouseKeeping(thumbnail.readListId)
     eventPublisher.publishEvent(DomainEvent.ThumbnailReadListDeleted(thumbnail))
   }
-
-  fun getThumbnailBytes(thumbnailId: String): ByteArray? =
-    thumbnailReadListRepository.findByIdOrNull(thumbnailId)?.thumbnail
 
   fun getThumbnailBytes(readList: ReadList): ByteArray {
     thumbnailReadListRepository.findSelectedByReadListIdOrNull(readList.id)?.let {

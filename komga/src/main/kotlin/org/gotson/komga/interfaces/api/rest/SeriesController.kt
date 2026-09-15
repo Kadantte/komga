@@ -18,19 +18,20 @@ import org.gotson.komga.application.tasks.HIGH_PRIORITY
 import org.gotson.komga.application.tasks.TaskEmitter
 import org.gotson.komga.domain.model.AlternateTitle
 import org.gotson.komga.domain.model.Author
-import org.gotson.komga.domain.model.BookSearchWithReadProgress
+import org.gotson.komga.domain.model.BookSearch
 import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.domain.model.DomainEvent
-import org.gotson.komga.domain.model.KomgaUser
+import org.gotson.komga.domain.model.EntityNotFoundException
 import org.gotson.komga.domain.model.MarkSelectedPreference
 import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.MediaType.ZIP
-import org.gotson.komga.domain.model.ROLE_ADMIN
-import org.gotson.komga.domain.model.ROLE_FILE_DOWNLOAD
 import org.gotson.komga.domain.model.ReadStatus
+import org.gotson.komga.domain.model.SearchCondition
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchField
+import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.model.SeriesMetadata
 import org.gotson.komga.domain.model.SeriesSearch
-import org.gotson.komga.domain.model.SeriesSearchWithReadProgress
 import org.gotson.komga.domain.model.ThumbnailSeries
 import org.gotson.komga.domain.model.WebLink
 import org.gotson.komga.domain.persistence.BookRepository
@@ -43,10 +44,11 @@ import org.gotson.komga.domain.service.SeriesLifecycle
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.openapi.AuthorsAsQueryParam
+import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
+import org.gotson.komga.infrastructure.openapi.PageableAsQueryParam
+import org.gotson.komga.infrastructure.openapi.PageableWithoutSortAsQueryParam
 import org.gotson.komga.infrastructure.security.KomgaPrincipal
-import org.gotson.komga.infrastructure.swagger.AuthorsAsQueryParam
-import org.gotson.komga.infrastructure.swagger.PageableAsQueryParam
-import org.gotson.komga.infrastructure.swagger.PageableWithoutSortAsQueryParam
 import org.gotson.komga.infrastructure.web.Authors
 import org.gotson.komga.infrastructure.web.DelimitedPair
 import org.gotson.komga.interfaces.api.ContentRestrictionChecker
@@ -93,6 +95,8 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.io.OutputStream
 import java.net.URI
 import java.nio.charset.StandardCharsets.UTF_8
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import java.util.zip.Deflater
 
 private val logger = KotlinLogging.logger {}
@@ -116,6 +120,8 @@ class SeriesController(
   private val thumbnailsSeriesRepository: ThumbnailSeriesRepository,
   private val contentRestrictionChecker: ContentRestrictionChecker,
 ) {
+  @Operation(summary = "List series", description = "Use POST /api/v1/series/list instead. Deprecated since 1.19.0.", tags = [OpenApiConfiguration.TagNames.SERIES, OpenApiConfiguration.TagNames.DEPRECATED])
+  @Deprecated("use /v1/series/list instead")
   @PageableAsQueryParam
   @AuthorsAsQueryParam
   @Parameters(
@@ -127,7 +133,7 @@ class SeriesController(
     ),
   )
   @GetMapping("v1/series")
-  fun getAllSeries(
+  fun getSeriesDeprecated(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "search", required = false) searchTerm: String? = null,
     @Parameter(hidden = true)
@@ -169,37 +175,87 @@ class SeriesController(
         )
 
     val seriesSearch =
-      SeriesSearchWithReadProgress(
-        libraryIds = principal.user.getAuthorizedLibraryIds(libraryIds),
-        collectionIds = collectionIds,
-        searchTerm = searchTerm,
-        searchRegex =
+      SeriesSearch(
+        condition =
+          SearchCondition.AllOfSeries(
+            buildList {
+              if (!libraryIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(libraryIds.map { SearchCondition.LibraryId(SearchOperator.Is(it)) }))
+              if (!collectionIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(collectionIds.map { SearchCondition.CollectionId(SearchOperator.Is(it)) }))
+              if (!metadataStatus.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(metadataStatus.map { SearchCondition.SeriesStatus(SearchOperator.Is(it)) }))
+              if (!publishers.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(publishers.map { SearchCondition.Publisher(SearchOperator.Is(it)) }))
+              if (!languages.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(languages.map { SearchCondition.Language(SearchOperator.Is(it)) }))
+              if (!genres.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(genres.map { SearchCondition.Genre(SearchOperator.Is(it)) }))
+              if (!tags.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(tags.map { SearchCondition.Tag(SearchOperator.Is(it)) }))
+              if (!readStatus.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(readStatus.map { SearchCondition.ReadStatus(SearchOperator.Is(it)) }))
+              if (!authors.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(authors.map { SearchCondition.Author(SearchOperator.Is(SearchCondition.AuthorMatch(it.name, it.role))) }))
+              if (!ageRatings.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(ageRatings.map { it.toIntOrNull()?.let { ageRating -> SearchCondition.AgeRating(SearchOperator.Is(ageRating)) } ?: SearchCondition.AgeRating(SearchOperator.IsNullT()) }))
+              if (!releaseYears.isNullOrEmpty())
+                add(
+                  SearchCondition.AnyOfSeries(
+                    releaseYears.mapNotNull { it.toIntOrNull() }.map { releaseYear ->
+                      SearchCondition.AllOfSeries(
+                        SearchCondition.ReleaseDate(SearchOperator.After(ZonedDateTime.of(releaseYear - 1, 12, 31, 12, 0, 0, 0, ZoneOffset.UTC))),
+                        SearchCondition.ReleaseDate(SearchOperator.Before(ZonedDateTime.of(releaseYear + 1, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC))),
+                      )
+                    },
+                  ),
+                )
+
+              if (!sharingLabels.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(sharingLabels.map { SearchCondition.SharingLabel(SearchOperator.Is(it)) }))
+              oneshot?.let { add(SearchCondition.OneShot(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              complete?.let { add(SearchCondition.Complete(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              deleted?.let { add(SearchCondition.Deleted(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+            },
+          ),
+        fullTextSearch = searchTerm,
+        regexSearch =
           searchRegex?.let {
             when (it.second.lowercase()) {
-              "title" -> Pair(it.first, SeriesSearch.SearchField.TITLE)
-              "title_sort" -> Pair(it.first, SeriesSearch.SearchField.TITLE_SORT)
+              "title" -> Pair(it.first, SearchField.TITLE)
+              "title_sort" -> Pair(it.first, SearchField.TITLE_SORT)
               else -> null
             }
           },
-        metadataStatus = metadataStatus,
-        publishers = publishers,
-        deleted = deleted,
-        complete = complete,
-        oneshot = oneshot,
-        languages = languages,
-        genres = genres,
-        tags = tags,
-        ageRatings = ageRatings?.map { it.toIntOrNull() },
-        releaseYears = releaseYears,
-        readStatus = readStatus,
-        authors = authors,
-        sharingLabels = sharingLabels,
       )
 
-    return seriesDtoRepository.findAll(seriesSearch, principal.user.id, pageRequest, principal.user.restrictions)
-      .map { it.restrictUrl(!principal.user.roleAdmin) }
+    return seriesDtoRepository
+      .findAll(seriesSearch, SearchContext(principal.user), pageRequest)
+      .map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
+  @Operation(summary = "List series", tags = [OpenApiConfiguration.TagNames.SERIES])
+  @PageableAsQueryParam
+  @PostMapping("v1/series/list")
+  fun getSeries(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @RequestBody search: SeriesSearch,
+    @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
+    @Parameter(hidden = true) page: Pageable,
+  ): Page<SeriesDto> {
+    val sort =
+      when {
+        page.sort.isSorted -> page.sort
+        !search.fullTextSearch.isNullOrBlank() -> Sort.by("relevance")
+        else -> Sort.unsorted()
+      }
+
+    val pageRequest =
+      if (unpaged)
+        UnpagedSorted(sort)
+      else
+        PageRequest.of(
+          page.pageNumber,
+          page.pageSize,
+          sort,
+        )
+
+    return seriesDtoRepository
+      .findAll(search, SearchContext(principal.user), pageRequest)
+      .map { it.restrictUrl(!principal.user.isAdmin) }
+  }
+
+  @Operation(summary = "List series groups", description = "Use POST /api/v1/series/list/alphabetical-groups instead. Deprecated since 1.19.0.", tags = [OpenApiConfiguration.TagNames.SERIES, OpenApiConfiguration.TagNames.DEPRECATED])
+  @Deprecated("use /v1/series/list/alphabetical-groups instead")
   @AuthorsAsQueryParam
   @Parameters(
     Parameter(
@@ -210,7 +266,7 @@ class SeriesController(
     ),
   )
   @GetMapping("v1/series/alphabetical-groups")
-  fun getAlphabeticalGroups(
+  fun getSeriesAlphabeticalGroupsDeprecated(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "search", required = false) searchTerm: String?,
     @Parameter(hidden = true)
@@ -234,40 +290,63 @@ class SeriesController(
     @Parameter(hidden = true) page: Pageable,
   ): List<GroupCountDto> {
     val seriesSearch =
-      SeriesSearchWithReadProgress(
-        libraryIds = principal.user.getAuthorizedLibraryIds(libraryIds),
-        collectionIds = collectionIds,
-        searchTerm = searchTerm,
-        searchRegex =
+      SeriesSearch(
+        condition =
+          SearchCondition.AllOfSeries(
+            buildList {
+              if (!libraryIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(libraryIds.map { SearchCondition.LibraryId(SearchOperator.Is(it)) }))
+              if (!collectionIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(collectionIds.map { SearchCondition.CollectionId(SearchOperator.Is(it)) }))
+              if (!metadataStatus.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(metadataStatus.map { SearchCondition.SeriesStatus(SearchOperator.Is(it)) }))
+              if (!publishers.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(publishers.map { SearchCondition.Publisher(SearchOperator.Is(it)) }))
+              if (!languages.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(languages.map { SearchCondition.Language(SearchOperator.Is(it)) }))
+              if (!genres.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(genres.map { SearchCondition.Genre(SearchOperator.Is(it)) }))
+              if (!tags.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(tags.map { SearchCondition.Tag(SearchOperator.Is(it)) }))
+              if (!readStatus.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(readStatus.map { SearchCondition.ReadStatus(SearchOperator.Is(it)) }))
+              if (!authors.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(authors.map { SearchCondition.Author(SearchOperator.Is(SearchCondition.AuthorMatch(it.name, it.role))) }))
+              if (!ageRatings.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(ageRatings.map { it.toIntOrNull()?.let { ageRating -> SearchCondition.AgeRating(SearchOperator.Is(ageRating)) } ?: SearchCondition.AgeRating(SearchOperator.IsNullT()) }))
+              if (!releaseYears.isNullOrEmpty())
+                add(
+                  SearchCondition.AnyOfSeries(
+                    releaseYears.mapNotNull { it.toIntOrNull() }.map { releaseYear ->
+                      SearchCondition.AllOfSeries(
+                        SearchCondition.ReleaseDate(SearchOperator.After(ZonedDateTime.of(releaseYear - 1, 12, 31, 12, 0, 0, 0, ZoneOffset.UTC))),
+                        SearchCondition.ReleaseDate(SearchOperator.Before(ZonedDateTime.of(releaseYear + 1, 1, 1, 12, 0, 0, 0, ZoneOffset.UTC))),
+                      )
+                    },
+                  ),
+                )
+
+              if (!sharingLabels.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(sharingLabels.map { SearchCondition.SharingLabel(SearchOperator.Is(it)) }))
+              oneshot?.let { add(SearchCondition.OneShot(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              complete?.let { add(SearchCondition.Complete(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              deleted?.let { add(SearchCondition.Deleted(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+            },
+          ),
+        fullTextSearch = searchTerm,
+        regexSearch =
           searchRegex?.let {
             when (it.second.lowercase()) {
-              "title" -> Pair(it.first, SeriesSearch.SearchField.TITLE)
-              "title_sort" -> Pair(it.first, SeriesSearch.SearchField.TITLE_SORT)
+              "title" -> Pair(it.first, SearchField.TITLE)
+              "title_sort" -> Pair(it.first, SearchField.TITLE_SORT)
               else -> null
             }
           },
-        metadataStatus = metadataStatus,
-        publishers = publishers,
-        deleted = deleted,
-        complete = complete,
-        oneshot = oneshot,
-        languages = languages,
-        genres = genres,
-        tags = tags,
-        ageRatings = ageRatings?.map { it.toIntOrNull() },
-        releaseYears = releaseYears,
-        readStatus = readStatus,
-        authors = authors,
-        sharingLabels = sharingLabels,
       )
 
-    return seriesDtoRepository.countByFirstCharacter(seriesSearch, principal.user.id, principal.user.restrictions)
+    return seriesDtoRepository.countByFirstCharacter(seriesSearch, SearchContext(principal.user))
   }
 
-  @Operation(description = "Return recently added or updated series.")
+  @Operation(summary = "List series groups", description = "List series grouped by the first character of their sort title.", tags = [OpenApiConfiguration.TagNames.SERIES])
+  @PostMapping("v1/series/list/alphabetical-groups")
+  fun getSeriesAlphabeticalGroups(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @RequestBody search: SeriesSearch,
+  ): List<GroupCountDto> = seriesDtoRepository.countByFirstCharacter(search, SearchContext(principal.user))
+
+  @Operation(summary = "List latest series", description = "Return recently added or updated series.", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PageableWithoutSortAsQueryParam
   @GetMapping("v1/series/latest")
-  fun getLatestSeries(
+  fun getSeriesLatest(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>?,
     @RequestParam(name = "deleted", required = false) deleted: Boolean?,
@@ -287,22 +366,26 @@ class SeriesController(
           sort,
         )
 
-    return seriesDtoRepository.findAll(
-      SeriesSearchWithReadProgress(
-        libraryIds = principal.user.getAuthorizedLibraryIds(libraryIds),
-        deleted = deleted,
-        oneshot = oneshot,
-      ),
-      principal.user.id,
-      pageRequest,
-      principal.user.restrictions,
-    ).map { it.restrictUrl(!principal.user.roleAdmin) }
+    return seriesDtoRepository
+      .findAll(
+        SeriesSearch(
+          SearchCondition.AllOfSeries(
+            buildList {
+              if (!libraryIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(libraryIds.map { SearchCondition.LibraryId(SearchOperator.Is(it)) }))
+              deleted?.let { add(SearchCondition.Deleted(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              oneshot?.let { add(SearchCondition.OneShot(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+            },
+          ),
+        ),
+        SearchContext(principal.user),
+        pageRequest,
+      ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
-  @Operation(description = "Return newly added series.")
+  @Operation(summary = "List new series", description = "Return newly added series.", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PageableWithoutSortAsQueryParam
   @GetMapping("v1/series/new")
-  fun getNewSeries(
+  fun getSeriesNew(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>? = null,
     @RequestParam(name = "deleted", required = false) deleted: Boolean? = null,
@@ -322,22 +405,26 @@ class SeriesController(
           sort,
         )
 
-    return seriesDtoRepository.findAll(
-      SeriesSearchWithReadProgress(
-        libraryIds = principal.user.getAuthorizedLibraryIds(libraryIds),
-        deleted = deleted,
-        oneshot = oneshot,
-      ),
-      principal.user.id,
-      pageRequest,
-      principal.user.restrictions,
-    ).map { it.restrictUrl(!principal.user.roleAdmin) }
+    return seriesDtoRepository
+      .findAll(
+        SeriesSearch(
+          SearchCondition.AllOfSeries(
+            buildList {
+              if (!libraryIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(libraryIds.map { SearchCondition.LibraryId(SearchOperator.Is(it)) }))
+              deleted?.let { add(SearchCondition.Deleted(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              oneshot?.let { add(SearchCondition.OneShot(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+            },
+          ),
+        ),
+        SearchContext(principal.user),
+        pageRequest,
+      ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
-  @Operation(description = "Return recently updated series, but not newly added ones.")
+  @Operation(summary = "List updated series", description = "Return recently updated series, but not newly added ones.", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PageableWithoutSortAsQueryParam
   @GetMapping("v1/series/updated")
-  fun getUpdatedSeries(
+  fun getSeriesUpdated(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>? = null,
     @RequestParam(name = "deleted", required = false) deleted: Boolean? = null,
@@ -357,40 +444,48 @@ class SeriesController(
           sort,
         )
 
-    return seriesDtoRepository.findAllRecentlyUpdated(
-      SeriesSearchWithReadProgress(
-        libraryIds = principal.user.getAuthorizedLibraryIds(libraryIds),
-        deleted = deleted,
-        oneshot = oneshot,
-      ),
-      principal.user.id,
-      principal.user.restrictions,
-      pageRequest,
-    ).map { it.restrictUrl(!principal.user.roleAdmin) }
+    return seriesDtoRepository
+      .findAllRecentlyUpdated(
+        SeriesSearch(
+          SearchCondition.AllOfSeries(
+            buildList {
+              if (!libraryIds.isNullOrEmpty()) add(SearchCondition.AnyOfSeries(libraryIds.map { SearchCondition.LibraryId(SearchOperator.Is(it)) }))
+              deleted?.let { add(SearchCondition.Deleted(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+              oneshot?.let { add(SearchCondition.OneShot(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+            },
+          ),
+        ),
+        SearchContext(principal.user),
+        pageRequest,
+      ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
+  @Operation(summary = "Get series details", tags = [OpenApiConfiguration.TagNames.SERIES])
   @GetMapping("v1/series/{seriesId}")
-  fun getOneSeries(
+  @Throws(EntityNotFoundException::class)
+  fun getSeriesById(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "seriesId") id: String,
   ): SeriesDto =
     seriesDtoRepository.findByIdOrNull(id, principal.user.id)?.let {
-      contentRestrictionChecker.checkContentRestriction(principal.user, it)
-      it.restrictUrl(!principal.user.roleAdmin)
-    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+      contentRestrictionChecker.checkContentRestrictionSeries(principal.user, it)
+      it.restrictUrl(!principal.user.isAdmin)
+    } ?: throw EntityNotFoundException()
 
+  @Operation(summary = "Get series' poster image", tags = [OpenApiConfiguration.TagNames.SERIES_POSTER])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])
   @GetMapping(value = ["v1/series/{seriesId}/thumbnail"], produces = [MediaType.IMAGE_JPEG_VALUE])
-  fun getSeriesDefaultThumbnail(
+  fun getSeriesThumbnail(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "seriesId") seriesId: String,
   ): ByteArray {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
     return seriesLifecycle.getThumbnailBytes(seriesId, principal.user.id)
       ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Get series poster image", tags = [OpenApiConfiguration.TagNames.SERIES_POSTER])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])
   @GetMapping(value = ["v1/series/{seriesId}/thumbnails/{thumbnailId}"], produces = [MediaType.IMAGE_JPEG_VALUE])
   fun getSeriesThumbnailById(
@@ -398,26 +493,30 @@ class SeriesController(
     @PathVariable(name = "seriesId") seriesId: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ): ByteArray {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeriesThumbnail(principal.user, thumbnailId)
 
     return seriesLifecycle.getThumbnailBytesByThumbnailId(thumbnailId)
       ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "List series posters", tags = [OpenApiConfiguration.TagNames.SERIES_POSTER])
   @GetMapping(value = ["v1/series/{seriesId}/thumbnails"], produces = [MediaType.APPLICATION_JSON_VALUE])
   fun getSeriesThumbnails(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "seriesId") seriesId: String,
   ): Collection<ThumbnailSeriesDto> {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
-    return thumbnailsSeriesRepository.findAllBySeriesId(seriesId)
+    return thumbnailsSeriesRepository
+      .findAllBySeriesId(seriesId)
       .map { it.toDto() }
   }
 
+  @Operation(summary = "Add series poster", tags = [OpenApiConfiguration.TagNames.SERIES_POSTER])
   @PostMapping(value = ["v1/series/{seriesId}/thumbnails"], consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
-  fun postUserUploadedSeriesThumbnail(
+  @PreAuthorize("hasRole('ADMIN')")
+  fun addUserUploadedSeriesThumbnail(
     @PathVariable(name = "seriesId") seriesId: String,
     @RequestParam("file") file: MultipartFile,
     @RequestParam("selected") selected: Boolean = true,
@@ -429,54 +528,63 @@ class SeriesController(
     if (!contentDetector.isImage(mediaType))
       throw ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
 
-    return seriesLifecycle.addThumbnailForSeries(
-      ThumbnailSeries(
-        seriesId = series.id,
-        thumbnail = file.bytes,
-        type = ThumbnailSeries.Type.USER_UPLOADED,
-        fileSize = file.bytes.size.toLong(),
-        mediaType = mediaType,
-        dimension = imageAnalyzer.getDimension(file.inputStream.buffered()) ?: Dimension(0, 0),
-      ),
-      if (selected) MarkSelectedPreference.YES else MarkSelectedPreference.NO,
-    ).toDto()
+    return seriesLifecycle
+      .addThumbnailForSeries(
+        ThumbnailSeries(
+          seriesId = series.id,
+          thumbnail = file.bytes,
+          type = ThumbnailSeries.Type.USER_UPLOADED,
+          fileSize = file.bytes.size.toLong(),
+          mediaType = mediaType,
+          dimension = imageAnalyzer.getDimension(file.inputStream.buffered()) ?: Dimension(0, 0),
+        ),
+        if (selected) MarkSelectedPreference.YES else MarkSelectedPreference.NO,
+      ).toDto()
   }
 
+  @Operation(summary = "Mark series poster as selected", tags = [OpenApiConfiguration.TagNames.SERIES_POSTER])
   @PutMapping("v1/series/{seriesId}/thumbnails/{thumbnailId}/selected")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  fun postMarkSelectedSeriesThumbnail(
+  fun markSeriesThumbnailSelected(
     @PathVariable(name = "seriesId") seriesId: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ) {
-    seriesRepository.findByIdOrNull(seriesId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-    thumbnailsSeriesRepository.findByIdOrNull(thumbnailId)?.let {
-      thumbnailsSeriesRepository.markSelected(it)
-      eventPublisher.publishEvent(DomainEvent.ThumbnailSeriesAdded(it.copy(selected = true)))
+    seriesRepository.findByIdOrNull(seriesId)?.let { series ->
+      thumbnailsSeriesRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.seriesId != series.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        thumbnailsSeriesRepository.markSelected(poster)
+        eventPublisher.publishEvent(DomainEvent.ThumbnailSeriesAdded(poster.copy(selected = true)))
+      } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Delete series poster", tags = [OpenApiConfiguration.TagNames.SERIES_POSTER])
   @DeleteMapping("v1/series/{seriesId}/thumbnails/{thumbnailId}")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
   fun deleteUserUploadedSeriesThumbnail(
     @PathVariable(name = "seriesId") seriesId: String,
     @PathVariable(name = "thumbnailId") thumbnailId: String,
   ) {
-    seriesRepository.findByIdOrNull(seriesId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-    thumbnailsSeriesRepository.findByIdOrNull(thumbnailId)?.let {
-      try {
-        seriesLifecycle.deleteThumbnailForSeries(it)
-      } catch (e: IllegalArgumentException) {
-        throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
-      }
+    seriesRepository.findByIdOrNull(seriesId)?.let { series ->
+      thumbnailsSeriesRepository.findByIdOrNull(thumbnailId)?.let { poster ->
+        if (poster.seriesId != series.id) throw ResponseStatusException(HttpStatus.BAD_REQUEST)
+        try {
+          seriesLifecycle.deleteThumbnailForSeries(poster)
+        } catch (e: IllegalArgumentException) {
+          throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
+        }
+      } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "List series' books", description = "Use POST /api/v1/books/list instead. Deprecated since 1.19.0.", tags = [OpenApiConfiguration.TagNames.SERIES, OpenApiConfiguration.TagNames.DEPRECATED])
+  @Deprecated("use /v1/books/list instead")
   @PageableAsQueryParam
   @AuthorsAsQueryParam
   @GetMapping("v1/series/{seriesId}/books")
-  fun getAllBooksBySeries(
+  fun getBooksBySeriesId(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "seriesId") seriesId: String,
     @RequestParam(name = "media_status", required = false) mediaStatus: List<Media.Status>? = null,
@@ -487,7 +595,7 @@ class SeriesController(
     @Parameter(hidden = true) @Authors authors: List<Author>? = null,
     @Parameter(hidden = true) page: Pageable,
   ): Page<BookDto> {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
     val sort =
       if (page.sort.isSorted)
@@ -505,44 +613,55 @@ class SeriesController(
           sort,
         )
 
-    return bookDtoRepository.findAll(
-      BookSearchWithReadProgress(
-        seriesIds = listOf(seriesId),
-        mediaStatus = mediaStatus,
-        deleted = deleted,
-        readStatus = readStatus,
-        tags = tags,
-        authors = authors,
-      ),
-      principal.user.id,
-      pageRequest,
-    ).map { it.restrictUrl(!principal.user.roleAdmin) }
+    val search =
+      BookSearch(
+        SearchCondition.AllOfBook(
+          buildList {
+            add(SearchCondition.SeriesId(SearchOperator.Is(seriesId)))
+            if (!mediaStatus.isNullOrEmpty()) add(SearchCondition.AnyOfBook(mediaStatus.map { SearchCondition.MediaStatus(SearchOperator.Is(it)) }))
+            if (!readStatus.isNullOrEmpty()) add(SearchCondition.AnyOfBook(readStatus.map { SearchCondition.ReadStatus(SearchOperator.Is(it)) }))
+            if (!tags.isNullOrEmpty()) add(SearchCondition.AnyOfBook(tags.map { SearchCondition.Tag(SearchOperator.Is(it)) }))
+            if (!authors.isNullOrEmpty()) add(SearchCondition.AnyOfBook(authors.map { SearchCondition.Author(SearchOperator.Is(SearchCondition.AuthorMatch(it.name, it.role))) }))
+            deleted?.let { add(SearchCondition.Deleted(if (it) SearchOperator.IsTrue else SearchOperator.IsFalse)) }
+          },
+        ),
+      )
+    return bookDtoRepository
+      .findAll(
+        search,
+        SearchContext(principal.user),
+        pageRequest,
+      ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
+  @Operation(summary = "List series' collections", tags = [OpenApiConfiguration.TagNames.SERIES])
   @GetMapping("v1/series/{seriesId}/collections")
-  fun getAllCollectionsBySeries(
+  fun getCollectionsBySeriesId(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable(name = "seriesId") seriesId: String,
   ): List<CollectionDto> {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
-    return collectionRepository.findAllContainingSeriesId(seriesId, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)
+    return collectionRepository
+      .findAllContainingSeriesId(seriesId, principal.user.getAuthorizedLibraryIds(null), principal.user.restrictions)
       .map { it.toDto() }
   }
 
+  @Operation(summary = "Analyze series", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PostMapping("v1/series/{seriesId}/analyze")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  fun analyze(
+  fun seriesAnalyze(
     @PathVariable seriesId: String,
   ) {
     taskEmitter.analyzeBook(bookRepository.findAllBySeriesId(seriesId), HIGH_PRIORITY)
   }
 
+  @Operation(summary = "Refresh series metadata", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PostMapping("v1/series/{seriesId}/metadata/refresh")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  fun refreshMetadata(
+  fun seriesRefreshMetadata(
     @PathVariable seriesId: String,
   ) {
     val books = bookRepository.findAllBySeriesId(seriesId)
@@ -551,142 +670,147 @@ class SeriesController(
     taskEmitter.refreshSeriesLocalArtwork(seriesId, priority = HIGH_PRIORITY)
   }
 
+  @Operation(summary = "Update series metadata", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PatchMapping("v1/series/{seriesId}/metadata")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun updateMetadata(
+  fun updateSeriesMetadata(
     @PathVariable seriesId: String,
     @Parameter(description = "Metadata fields to update. Set a field to null to unset the metadata. You can omit fields you don't want to update.")
     @Valid
     @RequestBody
     newMetadata: SeriesMetadataUpdateDto,
     @AuthenticationPrincipal principal: KomgaPrincipal,
-  ) =
-    seriesMetadataRepository.findByIdOrNull(seriesId)?.let { existing ->
-      val updated =
-        with(newMetadata) {
-          existing.copy(
-            status = status ?: existing.status,
-            statusLock = statusLock ?: existing.statusLock,
-            title = title ?: existing.title,
-            titleLock = titleLock ?: existing.titleLock,
-            titleSort = titleSort ?: existing.titleSort,
-            titleSortLock = titleSortLock ?: existing.titleSortLock,
-            summary = summary ?: existing.summary,
-            summaryLock = summaryLock ?: existing.summaryLock,
-            language = language ?: existing.language,
-            languageLock = languageLock ?: existing.languageLock,
-            readingDirection = if (isSet("readingDirection")) readingDirection else existing.readingDirection,
-            readingDirectionLock = readingDirectionLock ?: existing.readingDirectionLock,
-            publisher = publisher ?: existing.publisher,
-            publisherLock = publisherLock ?: existing.publisherLock,
-            ageRating = if (isSet("ageRating")) ageRating else existing.ageRating,
-            ageRatingLock = ageRatingLock ?: existing.ageRatingLock,
-            genres =
-              if (isSet("genres")) {
-                if (genres != null) genres!! else emptySet()
-              } else {
-                existing.genres
-              },
-            genresLock = genresLock ?: existing.genresLock,
-            tags =
-              if (isSet("tags")) {
-                if (tags != null) tags!! else emptySet()
-              } else {
-                existing.tags
-              },
-            tagsLock = tagsLock ?: existing.tagsLock,
-            totalBookCount = if (isSet("totalBookCount")) totalBookCount else existing.totalBookCount,
-            totalBookCountLock = totalBookCountLock ?: existing.totalBookCountLock,
-            sharingLabels =
-              if (isSet("sharingLabels")) {
-                if (sharingLabels != null) sharingLabels!! else emptySet()
-              } else {
-                existing.sharingLabels
-              },
-            sharingLabelsLock = sharingLabelsLock ?: existing.sharingLabelsLock,
-            links =
-              if (isSet("links")) {
-                if (links != null) links!!.map { WebLink(it.label!!, URI(it.url!!)) } else emptyList()
-              } else {
-                existing.links
-              },
-            linksLock = linksLock ?: existing.linksLock,
-            alternateTitles =
-              if (isSet("alternateTitles")) {
-                if (alternateTitles != null) alternateTitles!!.map { AlternateTitle(it.label!!, it.title!!) } else emptyList()
-              } else {
-                existing.alternateTitles
-              },
-            alternateTitlesLock = alternateTitlesLock ?: existing.alternateTitlesLock,
-          )
-        }
-      seriesMetadataRepository.update(updated)
+  ) = seriesMetadataRepository.findByIdOrNull(seriesId)?.let { existing ->
+    val updated =
+      with(newMetadata) {
+        existing.copy(
+          status = status ?: existing.status,
+          statusLock = statusLock ?: existing.statusLock,
+          title = title ?: existing.title,
+          titleLock = titleLock ?: existing.titleLock,
+          titleSort = titleSort ?: existing.titleSort,
+          titleSortLock = titleSortLock ?: existing.titleSortLock,
+          summary = summary ?: existing.summary,
+          summaryLock = summaryLock ?: existing.summaryLock,
+          language = language ?: existing.language,
+          languageLock = languageLock ?: existing.languageLock,
+          readingDirection = if (isSet("readingDirection")) readingDirection else existing.readingDirection,
+          readingDirectionLock = readingDirectionLock ?: existing.readingDirectionLock,
+          publisher = publisher ?: existing.publisher,
+          publisherLock = publisherLock ?: existing.publisherLock,
+          ageRating = if (isSet("ageRating")) ageRating else existing.ageRating,
+          ageRatingLock = ageRatingLock ?: existing.ageRatingLock,
+          genres =
+            if (isSet("genres")) {
+              if (genres != null) genres!! else emptySet()
+            } else {
+              existing.genres
+            },
+          genresLock = genresLock ?: existing.genresLock,
+          tags =
+            if (isSet("tags")) {
+              if (tags != null) tags!! else emptySet()
+            } else {
+              existing.tags
+            },
+          tagsLock = tagsLock ?: existing.tagsLock,
+          totalBookCount = if (isSet("totalBookCount")) totalBookCount else existing.totalBookCount,
+          totalBookCountLock = totalBookCountLock ?: existing.totalBookCountLock,
+          sharingLabels =
+            if (isSet("sharingLabels")) {
+              if (sharingLabels != null) sharingLabels!! else emptySet()
+            } else {
+              existing.sharingLabels
+            },
+          sharingLabelsLock = sharingLabelsLock ?: existing.sharingLabelsLock,
+          links =
+            if (isSet("links")) {
+              if (links != null) links!!.map { WebLink(it.label!!, URI(it.url!!)) } else emptyList()
+            } else {
+              existing.links
+            },
+          linksLock = linksLock ?: existing.linksLock,
+          alternateTitles =
+            if (isSet("alternateTitles")) {
+              if (alternateTitles != null) alternateTitles!!.map { AlternateTitle(it.label!!, it.title!!) } else emptyList()
+            } else {
+              existing.alternateTitles
+            },
+          alternateTitlesLock = alternateTitlesLock ?: existing.alternateTitlesLock,
+        )
+      }
+    seriesMetadataRepository.update(updated)
 
-      seriesRepository.findByIdOrNull(seriesId)?.let { eventPublisher.publishEvent(DomainEvent.SeriesUpdated(it)) }
-    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    seriesRepository.findByIdOrNull(seriesId)?.let { eventPublisher.publishEvent(DomainEvent.SeriesUpdated(it)) }
+  } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
-  @Operation(description = "Mark all book for series as read")
+  @Operation(summary = "Mark series as read", description = "Mark all book for series as read", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PostMapping("v1/series/{seriesId}/read-progress")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun markAsRead(
+  fun markSeriesAsRead(
     @PathVariable seriesId: String,
     @AuthenticationPrincipal principal: KomgaPrincipal,
   ) {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
     seriesLifecycle.markReadProgressCompleted(seriesId, principal.user)
   }
 
-  @Operation(description = "Mark all book for series as unread")
+  @Operation(summary = "Mark series as unread", description = "Mark all book for series as unread", tags = [OpenApiConfiguration.TagNames.SERIES])
   @DeleteMapping("v1/series/{seriesId}/read-progress")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun markAsUnread(
+  fun markSeriesAsUnread(
     @PathVariable seriesId: String,
     @AuthenticationPrincipal principal: KomgaPrincipal,
   ) {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
     seriesLifecycle.deleteReadProgress(seriesId, principal.user)
   }
 
+  @Operation(summary = "Get series read progress (Mihon)", description = "Mihon specific, due to how read progress is handled in Mihon.", tags = [OpenApiConfiguration.TagNames.MIHON])
   @GetMapping("v2/series/{seriesId}/read-progress/tachiyomi")
-  fun getReadProgressTachiyomiV2(
+  fun getMihonReadProgressBySeriesId(
     @PathVariable seriesId: String,
     @AuthenticationPrincipal principal: KomgaPrincipal,
   ): TachiyomiReadProgressV2Dto {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
     return readProgressDtoRepository.findProgressV2BySeries(seriesId, principal.user.id)
   }
 
+  @Operation(summary = "Update series read progress (Mihon)", description = "Mihon specific, due to how read progress is handled in Mihon.", tags = [OpenApiConfiguration.TagNames.MIHON])
   @PutMapping("v2/series/{seriesId}/read-progress/tachiyomi")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  fun markReadProgressTachiyomiV2(
+  fun updateMihonReadProgressBySeriesId(
     @PathVariable seriesId: String,
     @RequestBody readProgress: TachiyomiReadProgressUpdateV2Dto,
     @AuthenticationPrincipal principal: KomgaPrincipal,
   ) {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
-    bookDtoRepository.findAll(
-      BookSearchWithReadProgress(seriesIds = listOf(seriesId)),
-      principal.user.id,
-      UnpagedSorted(Sort.by(Sort.Order.asc("metadata.numberSort"))),
-    ).toList().filter { book -> book.metadata.numberSort <= readProgress.lastBookNumberSortRead }
+    bookDtoRepository
+      .findAll(
+        BookSearch(SearchCondition.SeriesId(SearchOperator.Is(seriesId))),
+        SearchContext(principal.user),
+        UnpagedSorted(Sort.by(Sort.Order.asc("metadata.numberSort"))),
+      ).toList()
+      .filter { book -> book.metadata.numberSort <= readProgress.lastBookNumberSortRead }
       .forEach { book ->
         if (book.readProgress?.completed != true)
           bookLifecycle.markReadProgressCompleted(book.id, principal.user)
       }
   }
 
+  @Operation(summary = "Download series", description = "Download the whole series as a ZIP file.", tags = [OpenApiConfiguration.TagNames.SERIES])
   @GetMapping("v1/series/{seriesId}/file", produces = [MediaType.APPLICATION_OCTET_STREAM_VALUE])
-  @PreAuthorize("hasRole('$ROLE_FILE_DOWNLOAD')")
-  fun getSeriesFile(
+  @PreAuthorize("hasRole('FILE_DOWNLOAD')")
+  fun downloadSeriesAsZip(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable seriesId: String,
   ): ResponseEntity<StreamingResponseBody> {
-    principal.user.checkContentRestriction(seriesId)
+    contentRestrictionChecker.checkContentRestrictionSeries(principal.user, seriesId)
 
     val books = bookRepository.findAllBySeriesId(seriesId)
 
@@ -713,46 +837,30 @@ class SeriesController(
         }
       }
 
-    return ResponseEntity.ok()
+    return ResponseEntity
+      .ok()
       .headers(
         HttpHeaders().apply {
           contentDisposition =
-            ContentDisposition.builder("attachment")
+            ContentDisposition
+              .builder("attachment")
               .filename(seriesMetadataRepository.findById(seriesId).title + ".zip", UTF_8)
               .build()
         },
-      )
-      .contentType(MediaType.parseMediaType(ZIP.type))
+      ).contentType(MediaType.parseMediaType(ZIP.type))
       .body(streamingResponse)
   }
 
+  @Operation(summary = "Delete series files", description = "Delete all of the series' books files on disk.", tags = [OpenApiConfiguration.TagNames.SERIES])
   @DeleteMapping("v1/series/{seriesId}/file")
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  fun deleteSeries(
+  fun deleteSeriesFile(
     @PathVariable seriesId: String,
   ) {
     taskEmitter.deleteSeries(
       seriesId = seriesId,
       priority = HIGHEST_PRIORITY,
     )
-  }
-
-  /**
-   * Convenience function to check for content restriction.
-   * This will retrieve data from repositories if needed.
-   *
-   * @throws[ResponseStatusException] if the user cannot access the content
-   */
-  private fun KomgaUser.checkContentRestriction(seriesId: String) {
-    if (!canAccessAllLibraries()) {
-      seriesRepository.getLibraryId(seriesId)?.let {
-        if (!canAccessLibrary(it)) throw ResponseStatusException(HttpStatus.FORBIDDEN)
-      } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-    }
-    if (restrictions.isRestricted)
-      seriesMetadataRepository.findById(seriesId).let {
-        if (!isContentAllowed(it.ageRating, it.sharingLabels)) throw ResponseStatusException(HttpStatus.FORBIDDEN)
-      }
   }
 }

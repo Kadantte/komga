@@ -1,6 +1,9 @@
 package org.gotson.komga.interfaces.api.rest
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.tags.Tag
+import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.security.access.prepost.PreAuthorize
@@ -12,37 +15,48 @@ import org.springframework.web.server.ResponseStatusException
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.isDirectory
 import kotlin.streams.asSequence
 
 @RestController
 @RequestMapping("api/v1/filesystem", produces = [MediaType.APPLICATION_JSON_VALUE])
 @PreAuthorize("hasRole('ADMIN')")
+@Tag(name = OpenApiConfiguration.TagNames.FILE_SYSTEM)
 class FileSystemController {
   private val fs = FileSystems.getDefault()
 
   @PostMapping
+  @Operation(
+    summary = "Directory listing",
+    description = "List folders and files from the host server's file system. If no request body is passed then the root directories are returned.",
+  )
   fun getDirectoryListing(
     @RequestBody(required = false) request: DirectoryRequestDto = DirectoryRequestDto(),
   ): DirectoryListingDto =
     if (request.path.isEmpty()) {
       DirectoryListingDto(
         directories = fs.rootDirectories.map { it.toDto() },
+        files = emptyList(),
       )
     } else {
-      val p = fs.getPath(request.path)
-      if (!p.isAbsolute) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Path must be absolute")
+      val path = fs.getPath(request.path)
+      if (!path.isAbsolute) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Path must be absolute")
+      val directory = if (path.isDirectory()) path else path.parent
       try {
+        val (directories, files) =
+          Files.list(directory).use { dirStream ->
+            dirStream
+              .asSequence()
+              .filter { !Files.isHidden(it) && (if (!request.showFiles) Files.isDirectory(it) else true) }
+              .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.toString() })
+              .map { it.toDto() }
+              .toList()
+              .partition { it.type == "directory" }
+          }
         DirectoryListingDto(
-          parent = (p.parent ?: "").toString(),
-          directories =
-            Files.list(p).use { dirStream ->
-              dirStream.asSequence()
-                .filter { Files.isDirectory(it) }
-                .filter { !Files.isHidden(it) }
-                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.toString() })
-                .map { it.toDto() }
-                .toList()
-            },
+          parent = (path.parent ?: "").toString(),
+          directories = directories,
+          files = files,
         )
       } catch (e: Exception) {
         throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Path does not exist")
@@ -52,12 +66,14 @@ class FileSystemController {
 
 data class DirectoryRequestDto(
   val path: String = "",
+  val showFiles: Boolean = false,
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class DirectoryListingDto(
   val parent: String? = null,
   val directories: List<PathDto>,
+  val files: List<PathDto>,
 )
 
 data class PathDto(

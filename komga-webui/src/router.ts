@@ -21,6 +21,14 @@ const noLibraryGuard = (to: any, from: any, next: any) => {
   } else next()
 }
 
+const noLibraryNorPinGuard = (to: any, from: any, next: any) => {
+  if (lStore.state.komgaLibraries.libraries.length === 0) {
+    next({name: 'welcome'})
+  } else if (lStore.getters.getLibrariesPinned.length === 0) {
+    next({name: 'no-pins'})
+  } else next()
+}
+
 const getLibraryRoute = (libraryId: string) => {
   switch ((lStore.getters.getLibraryRoute(libraryId) as LIBRARY_ROUTE)) {
     case LIBRARY_ROUTE.COLLECTIONS:
@@ -29,6 +37,8 @@ const getLibraryRoute = (libraryId: string) => {
       return 'browse-readlists'
     case LIBRARY_ROUTE.BROWSE:
       return 'browse-libraries'
+    case LIBRARY_ROUTE.BOOKS:
+      return 'browse-books'
     case LIBRARY_ROUTE.RECOMMENDED:
     default:
       return libraryId === LIBRARIES_ALL ? 'browse-libraries' : 'recommended-libraries'
@@ -58,100 +68,114 @@ const router = new Router({
           component: () => import(/* webpackChunkName: "welcome" */ './views/WelcomeView.vue'),
         },
         {
+          path: '/no-pins',
+          name: 'no-pins',
+          component: () => import(/* webpackChunkName: "no-pins" */ './views/NoPinnedLibraries.vue'),
+        },
+        {
           path: '/dashboard',
           name: 'dashboard',
-          beforeEnter: noLibraryGuard,
+          beforeEnter: noLibraryNorPinGuard,
           component: () => import(/* webpackChunkName: "dashboard" */ './views/DashboardView.vue'),
         },
         {
-          path: '/settings',
-          name: 'settings',
-          redirect: {name: 'settings-users'},
-          component: () => import(/* webpackChunkName: "settings" */ './views/SettingsHolder.vue'),
+          path: '/settings/users',
+          name: 'settings-users',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "settings-users" */ './views/SettingsUsers.vue'),
           children: [
             {
-              path: '/settings/users',
-              name: 'settings-users',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "settings-users" */ './views/SettingsUsers.vue'),
-              children: [
-                {
-                  path: '/settings/users/add',
-                  name: 'settings-users-add',
-                  component: () => import(/* webpackChunkName: "settings-user" */ './components/dialogs/UserAddDialog.vue'),
-                },
-              ],
-            },
-            {
-              path: '/settings/server',
-              name: 'settings-server',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "settings-server" */ './views/SettingsServer.vue'),
-            },
-            {
-              path: '/settings/metrics',
-              name: 'metrics',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "metrics" */ './views/MetricsView.vue'),
-            },
-            {
-              path: '/settings/announcements',
-              name: 'announcements',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "announcements" */ './views/AnnouncementsView.vue'),
+              path: '/settings/users/add',
+              name: 'settings-users-add',
+              component: () => import(/* webpackChunkName: "settings-user" */ './components/dialogs/UserAddDialog.vue'),
             },
           ],
         },
         {
-          path: '/media-management',
-          name: 'media-management',
-          redirect: {name: 'media-analysis'},
-          component: () => import(/* webpackChunkName: "media-management" */ './views/MediaManagement.vue'),
-          children: [
-            {
-              path: '/media-management/analysis',
-              name: 'media-analysis',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "media-analysis" */ './views/MediaAnalysis.vue'),
-            },
-            {
-              path: '/media-management/duplicate-files',
-              name: 'duplicate-files',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "duplicate-files" */ './views/DuplicateFiles.vue'),
-            },
-            {
-              path: '/media-management/duplicate-pages',
-              name: 'duplicate-pages',
-              redirect: {name: 'settings-duplicate-pages-known'},
-              component: () => import(/* webpackChunkName: "duplicate-pages" */ './views/DuplicatePagesHolder.vue'),
-              children: [
-                {
-                  path: '/media-management/duplicate-pages/known',
-                  name: 'settings-duplicate-pages-known',
-                  beforeEnter: adminGuard,
-                  component: () => import(/* webpackChunkName: "duplicate-pages" */ './views/DuplicatePagesKnown.vue'),
-                },
-                {
-                  path: '/media-management/duplicate-pages/unknown',
-                  name: 'settings-duplicate-pages-unknown',
-                  beforeEnter: adminGuard,
-                  component: () => import(/* webpackChunkName: "duplicate-pages" */ './views/DuplicatePagesUnknown.vue'),
-                },
-              ],
-            },
-          ],
+          path: '/settings/server',
+          name: 'settings-server',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "settings-server" */ './views/SettingsServer.vue'),
+        },
+        {
+          path: '/settings/ui',
+          name: 'settings-ui',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "settings-ui" */ './views/UISettings.vue'),
+        },
+        {
+          path: '/settings/metrics',
+          name: 'metrics',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "metrics" */ './views/MetricsView.vue'),
+        },
+        {
+          path: '/settings/announcements',
+          name: 'announcements',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "announcements" */ './views/AnnouncementsView.vue'),
+        },
+        {
+          path: '/settings/updates',
+          name: 'updates',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "updates" */ './views/UpdatesView.vue'),
+        },
+        {
+          path: '/media-management/analysis',
+          name: 'media-analysis',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "media-analysis" */ './views/MediaAnalysis.vue'),
+        },
+        {
+          path: '/media-management/missing-posters',
+          name: 'missing-posters',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "missing-posters" */ './views/MissingPosters.vue'),
+        },
+        {
+          path: '/media-management/duplicate-files',
+          name: 'duplicate-files',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "duplicate-files" */ './views/DuplicateFiles.vue'),
+        },
+        {
+          path: '/media-management/duplicate-pages/known',
+          name: 'settings-duplicate-pages-known',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "duplicate-pages-known" */ './views/DuplicatePagesKnown.vue'),
+        },
+        {
+          path: '/media-management/duplicate-pages/unknown',
+          name: 'settings-duplicate-pages-unknown',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "duplicate-pages-new" */ './views/DuplicatePagesUnknown.vue'),
         },
         {
           path: '/history',
           name: 'history',
+          beforeEnter: adminGuard,
           component: () => import(/* webpackChunkName: "history" */ './views/HistoryView.vue'),
         },
-
         {
-          path: '/account',
-          name: 'account',
-          component: () => import(/* webpackChunkName: "account" */ './views/AccountSettings.vue'),
+          path: '/account/me',
+          name: 'account-me',
+          component: () => import(/* webpackChunkName: "account-me" */ './views/AccountView.vue'),
+        },
+        {
+          path: '/account/api-keys',
+          name: 'account-api-keys',
+          component: () => import(/* webpackChunkName: "account-api-keys" */ './views/ApiKeys.vue'),
+        },
+        {
+          path: '/account/settings-ui',
+          name: 'account-settings-ui',
+          component: () => import(/* webpackChunkName: "account-settings-ui" */ './views/UIUserSettings.vue'),
+        },
+        {
+          path: '/account/authentication-activity',
+          name: 'account-activity',
+          component: () => import(/* webpackChunkName: "account-activity" */ './views/SelfAuthenticationActivity.vue'),
         },
         {
           path: '/libraries/:libraryId?',
@@ -166,6 +190,13 @@ const router = new Router({
           name: 'recommended-libraries',
           beforeEnter: noLibraryGuard,
           component: () => import(/* webpackChunkName: "dashboard" */ './views/DashboardView.vue'),
+          props: (route) => ({libraryId: route.params.libraryId}),
+        },
+        {
+          path: '/libraries/:libraryId/books',
+          name: 'browse-books',
+          beforeEnter: noLibraryGuard,
+          component: () => import(/* webpackChunkName: "browse-books" */ './views/BrowseBooks.vue'),
           props: (route) => ({libraryId: route.params.libraryId}),
         },
         {
@@ -225,25 +256,16 @@ const router = new Router({
           component: () => import(/* webpackChunkName: "search" */ './views/SearchView.vue'),
         },
         {
-          path: '/import',
-          name: 'import',
-          redirect: {name: 'import-books'},
+          path: '/import/books',
+          name: 'import-books',
           beforeEnter: adminGuard,
-          component: () => import(/* webpackChunkName: "import" */ './views/ImportHolder.vue'),
-          children: [
-            {
-              path: '/import/books',
-              name: 'import-books',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "import-books" */ './views/ImportBooks.vue'),
-            },
-            {
-              path: '/import/readlist',
-              name: 'import-readlist',
-              beforeEnter: adminGuard,
-              component: () => import(/* webpackChunkName: "import-readlist" */ './views/ImportReadList.vue'),
-            },
-          ],
+          component: () => import(/* webpackChunkName: "import-books" */ './views/ImportBooks.vue'),
+        },
+        {
+          path: '/import/readlist',
+          name: 'import-readlist',
+          beforeEnter: adminGuard,
+          component: () => import(/* webpackChunkName: "import-readlist" */ './views/ImportReadList.vue'),
         },
       ],
     },
@@ -287,7 +309,10 @@ const router = new Router({
 })
 
 router.beforeEach((to, from, next) => {
-  if (!['read-book', 'read-epub', 'browse-book', 'browse-series'].includes(<string>to.name)) {
+  // avoid document.title flickering when changing route
+  if (!['read-book', 'read-epub', 'browse-book', 'browse-oneshot', 'browse-series', 'browse-libraries', 'browse-books',
+    'recommended-libraries', 'browse-collection', 'browse-collections', 'browse-readlist', 'browse-readlists'].includes(<string>to.name)
+  ) {
     document.title = 'Komga'
   }
 

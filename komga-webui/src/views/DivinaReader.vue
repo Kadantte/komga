@@ -129,6 +129,7 @@
         :animations="animations"
         :scale="continuousScale"
         :sidePadding="sidePadding"
+        :page-margin="pageMargin"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -219,6 +220,13 @@
                   :items="paddingPercentages"
                   v-model="sidePadding"
                   :label="$t('bookreader.settings.side_padding')"
+                />
+              </v-list-item>
+              <v-list-item>
+                <settings-select
+                  :items="marginValues"
+                  v-model="pageMargin"
+                  :label="$t('bookreader.settings.page_margin')"
                 />
               </v-list-item>
             </template>
@@ -323,7 +331,7 @@ import Vue from 'vue'
 import {Location} from 'vue-router'
 import PagedReader from '@/components/readers/PagedReader.vue'
 import ContinuousReader from '@/components/readers/ContinuousReader.vue'
-import {ContinuousScaleType, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
+import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
   shortcutsLTR,
   shortcutsRTL,
@@ -387,6 +395,7 @@ export default Vue.extend({
         scale: ScaleType.SCREEN,
         continuousScale: ContinuousScaleType.WIDTH,
         sidePadding: 0,
+        pageMargin: 0,
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
       },
@@ -414,6 +423,10 @@ export default Vue.extend({
       })),
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
+        value: x,
+      })),
+      marginValues: Object.values(MarginValues).map(x => ({
+        text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}px`,
         value: x,
       })),
       backgroundColors: [
@@ -451,6 +464,7 @@ export default Vue.extend({
     this.scale = this.$store.state.persistedState.webreader.paged.scale
     this.continuousScale = this.$store.state.persistedState.webreader.continuous.scale
     this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
+    this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
 
     this.setup(this.bookId, Number(this.$route.query.page))
@@ -504,7 +518,7 @@ export default Vue.extend({
       return this.pages.length
     },
     bookTitle(): string {
-      return getBookTitleCompact(this.book.metadata.title, this.series.metadata.title)
+      return getBookTitleCompact(this.book.metadata.title, this.series.metadata.title, this.book.oneshot ? undefined : this.book.metadata.number)
     },
     readingDirectionText(): string {
       return this.$t(`enums.reading_direction.${this.readingDirection}`).toString()
@@ -582,6 +596,17 @@ export default Vue.extend({
         if (PaddingPercentage.includes(padding)) {
           this.settings.sidePadding = padding
           this.$store.commit('setWebreaderContinuousPadding', padding)
+        }
+      },
+    },
+    pageMargin: {
+      get: function (): number {
+        return this.settings.pageMargin
+      },
+      set: function (margin: number): void {
+        if (MarginValues.includes(margin)) {
+          this.settings.pageMargin = margin
+          this.$store.commit('setWebreaderContinuousMargin', margin)
         }
       },
     },
@@ -673,7 +698,7 @@ export default Vue.extend({
         this.contextName = (await (this.$komgaReadLists.getOneReadList(this.context.id))).name
         document.title = `Komga - ${this.contextName} - ${this.book.metadata.title}`
       } else {
-        document.title = `Komga - ${getBookTitleCompact(this.book.metadata.title, this.series.metadata.title)}`
+        document.title = `Komga - ${this.bookTitle}`
       }
 
       // parse query params to get incognito mode
@@ -822,6 +847,14 @@ export default Vue.extend({
         this.sendNotification(`${this.$t('bookreader.cycling_side_padding')}: ${text}`)
       }
     },
+    cyclePageMargin() {
+      if (this.continuousReader) {
+        const i = (MarginValues.indexOf(this.settings.pageMargin) + 1) % (MarginValues.length)
+        this.pageMargin = MarginValues[i]
+        const text = this.pageMargin === 0 ? this.$t('bookreader.settings.side_padding_none').toString() : `${this.pageMargin}px`
+        this.sendNotification(`${this.$t('bookreader.cycling_page_margin')}: ${text}`)
+      }
+    },
     cyclePageLayout() {
       if (this.continuousReader) return
       const enumValues = Object.values(PagedReaderLayout)
@@ -873,14 +906,14 @@ export default Vue.extend({
     }, 50),
     downloadCurrentPage() {
       new jsFileDownloader({
-        url: this.currentPage.url,
+        url: `${this.currentPage.url}?contentNegotiation=false`,
         filename: `${this.book.name}-${this.currentPage.number}.${this.currentPage.fileName.split('.').pop()}`,
         withCredentials: true,
         forceDesktopMode: true,
       })
     },
     async setCurrentPageAsPoster(type: ItemTypes) {
-      const imageFile = await getFileFromUrl(this.currentPage.url, 'poster', 'image/jpeg', {credentials: 'include'})
+      const imageFile = await getFileFromUrl(`${this.currentPage.url}?contentNegotiation=false`, 'poster', 'image/jpeg', {credentials: 'include'})
       const newImageFile = await resizeImageFile(imageFile)
       switch (type) {
         case ItemTypes.BOOK:
@@ -920,5 +953,6 @@ export default Vue.extend({
 
 .html-reader {
   scrollbar-width: none;
+  overscroll-behavior: none;
 }
 </style>

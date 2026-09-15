@@ -1,8 +1,10 @@
 package org.gotson.komga.interfaces.api.rest
 
 import com.github.benmanes.caffeine.cache.Caffeine
-import org.gotson.komga.domain.model.ROLE_ADMIN
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.gotson.komga.domain.persistence.KomgaUserRepository
+import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
 import org.gotson.komga.infrastructure.security.KomgaPrincipal
 import org.gotson.komga.interfaces.api.rest.dto.JsonFeedDto
 import org.springframework.http.HttpStatus
@@ -23,32 +25,37 @@ private const val WEBSITE = "https://komga.org"
 
 @RestController
 @RequestMapping("api/v1/announcements", produces = [MediaType.APPLICATION_JSON_VALUE])
+@Tag(name = OpenApiConfiguration.TagNames.ANNOUNCEMENTS)
 class AnnouncementController(
   private val userRepository: KomgaUserRepository,
+  webClientBuilder: WebClient.Builder,
 ) {
-  private val webClient = WebClient.create("$WEBSITE/blog/feed.json")
+  private val webClient = webClientBuilder.baseUrl("$WEBSITE/blog/feed.json").build()
 
   private val cache =
-    Caffeine.newBuilder()
-      .expireAfterAccess(1, TimeUnit.DAYS)
-      .build<String, JsonFeedDto>()
+    Caffeine
+      .newBuilder()
+      .expireAfterAccess(1, TimeUnit.HOURS)
+      .build<String, JsonFeedDto?>()
 
   @GetMapping
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
+  @Operation(summary = "Retrieve announcements")
   fun getAnnouncements(
     @AuthenticationPrincipal principal: KomgaPrincipal,
-  ): JsonFeedDto {
-    return cache.get("announcements") { fetchWebsiteAnnouncements() }
+  ): JsonFeedDto =
+    cache
+      .get("announcements") { fetchWebsiteAnnouncements() }
       ?.let { feed ->
         val read = userRepository.findAnnouncementIdsReadByUserId(principal.user.id)
         feed.copy(items = feed.items.map { item -> item.copy(komgaExtension = JsonFeedDto.KomgaExtensionDto(read.contains(item.id))) })
       }
       ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-  }
 
-  @PreAuthorize("hasRole('$ROLE_ADMIN')")
+  @PreAuthorize("hasRole('ADMIN')")
   @PutMapping
   @ResponseStatus(HttpStatus.NO_CONTENT)
+  @Operation(summary = "Mark announcements as read")
   fun markAnnouncementsRead(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestBody announcementIds: Set<String>,
@@ -58,7 +65,8 @@ class AnnouncementController(
 
   fun fetchWebsiteAnnouncements(): JsonFeedDto? {
     val response =
-      webClient.get()
+      webClient
+        .get()
         .retrieve()
         .toEntity(JsonFeedDto::class.java)
         .block()

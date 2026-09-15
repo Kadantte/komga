@@ -7,14 +7,13 @@ import kotlin.io.path.exists
 
 plugins {
   run {
-    val kotlinVersion = "1.9.21"
+    val kotlinVersion = "2.4.10"
     kotlin("jvm") version kotlinVersion
     kotlin("plugin.spring") version kotlinVersion
     kotlin("kapt") version kotlinVersion
   }
-  id("org.jlleitschuh.gradle.ktlint") version "12.1.0"
-  id("com.github.ben-manes.versions") version "0.50.0"
-  id("org.jreleaser") version "1.10.0"
+  id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
+  id("org.jreleaser") version "1.25.0"
 }
 
 fun isNonStable(version: String): Boolean {
@@ -27,29 +26,32 @@ fun isNonStable(version: String): Boolean {
 
 group = "org.gotson"
 
+tasks.named<DependencyUpdatesTask>("dependencyUpdates") {
+  // disallow release candidates as upgradable versions from stable versions
+  rejectVersionIf {
+    isNonStable(candidate.version) && !isNonStable(currentVersion)
+  }
+  gradleReleaseChannel = "current"
+  checkConstraints = true
+}
+
 allprojects {
   repositories {
     mavenCentral()
   }
   apply(plugin = "org.jlleitschuh.gradle.ktlint")
-  apply(plugin = "com.github.ben-manes.versions")
-
-  tasks.named<DependencyUpdatesTask>("dependencyUpdates").configure {
-    // disallow release candidates as upgradable versions from stable versions
-    rejectVersionIf {
-      isNonStable(candidate.version) && !isNonStable(currentVersion)
-    }
-    gradleReleaseChannel = "current"
-    checkConstraints = true
-  }
 
   configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
-    version = "1.1.1"
+    version = "1.8.0"
+    filter {
+      exclude("**/generated-src/**")
+      exclude("**/generated/**")
+    }
   }
 }
 
 tasks.wrapper {
-  gradleVersion = "8.5"
+  gradleVersion = "9.6.1"
   distributionType = Wrapper.DistributionType.ALL
 }
 
@@ -160,7 +162,7 @@ jreleaser {
   packagers {
     docker {
       active = Active.RELEASE
-      continueOnError = true
+      continueOnError = false
       templateDirectory = rootDir.resolve("komga/docker")
       repository.active = Active.NEVER
       buildArgs = listOf("--cache-from", "gotson/komga:latest")

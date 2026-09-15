@@ -4,10 +4,12 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.gotson.komga.domain.model.Book
 import org.gotson.komga.domain.model.BookMetadataPatchCapability
 import org.gotson.komga.domain.model.BookPageNumbered
-import org.gotson.komga.domain.model.BookSearch
 import org.gotson.komga.domain.model.CopyMode
 import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.model.Media
+import org.gotson.komga.domain.model.SearchCondition
+import org.gotson.komga.domain.model.SearchContext
+import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.service.BookConverter
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
@@ -43,13 +45,16 @@ class TaskEmitter(
   fun analyzeUnknownAndOutdatedBooks(library: Library) {
     bookRepository
       .findAll(
-        BookSearch(
-          libraryIds = listOf(library.id),
-          mediaStatus = listOf(Media.Status.UNKNOWN, Media.Status.OUTDATED),
+        SearchCondition.AllOfBook(
+          SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+          SearchCondition.AnyOfBook(
+            SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.UNKNOWN)),
+            SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.OUTDATED)),
+          ),
         ),
+        SearchContext.empty(),
         UnpagedSorted(Sort.by(Sort.Order.asc("seriesId"), Sort.Order.asc("number"))),
-      )
-      .content
+      ).content
       .map { Task.AnalyzeBook(it.id, groupId = it.seriesId) }
       .let { submitTasks(it) }
   }
@@ -59,6 +64,14 @@ class TaskEmitter(
       bookRepository
         .findAllByLibraryIdAndWithEmptyHash(library.id)
         .map { Task.HashBook(it.id, LOWEST_PRIORITY) }
+        .let { submitTasks(it) }
+  }
+
+  fun hashBooksWithoutHashKoreader(library: Library) {
+    if (library.hashKoreader)
+      bookRepository
+        .findAllByLibraryIdAndWithEmptyHashKoreader(library.id)
+        .map { Task.HashBookKoreader(it.id, LOWEST_PRIORITY) }
         .let { submitTasks(it) }
   }
 
@@ -163,7 +176,7 @@ class TaskEmitter(
 
   fun refreshBookMetadata(
     book: Book,
-    capabilities: Set<BookMetadataPatchCapability> = BookMetadataPatchCapability.values().toSet(),
+    capabilities: Set<BookMetadataPatchCapability> = BookMetadataPatchCapability.entries.toSet(),
     priority: Int = DEFAULT_PRIORITY,
   ) {
     submitTask(Task.RefreshBookMetadata(book.id, capabilities, priority, book.seriesId))
@@ -171,7 +184,7 @@ class TaskEmitter(
 
   fun refreshBookMetadata(
     books: Collection<Book>,
-    capabilities: Set<BookMetadataPatchCapability> = BookMetadataPatchCapability.values().toSet(),
+    capabilities: Set<BookMetadataPatchCapability> = BookMetadataPatchCapability.entries.toSet(),
     priority: Int = DEFAULT_PRIORITY,
   ) {
     books
@@ -261,10 +274,6 @@ class TaskEmitter(
     submitTask(Task.DeleteSeries(seriesId, priority))
   }
 
-  fun fixThumbnailsWithoutMetadata(priority: Int = DEFAULT_PRIORITY) {
-    submitTask(Task.FixThumbnailsWithoutMetadata(priority))
-  }
-
   fun findBookThumbnailsToRegenerate(
     forBiggerResultOnly: Boolean,
     priority: Int = DEFAULT_PRIORITY,
@@ -275,12 +284,12 @@ class TaskEmitter(
   private fun submitTask(task: Task) {
     logger.info { "Sending task: $task" }
     tasksRepository.save(task)
-    eventPublisher.publishEvent(TaskAddedEvent())
+    eventPublisher.publishEvent(TaskAddedEvent)
   }
 
   private fun submitTasks(tasks: Collection<Task>) {
     logger.info { "Sending tasks: $tasks" }
     tasksRepository.save(tasks)
-    eventPublisher.publishEvent(TaskAddedEvent())
+    eventPublisher.publishEvent(TaskAddedEvent)
   }
 }

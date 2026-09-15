@@ -20,6 +20,8 @@ class Hasher {
     return computeHash(path.inputStream())
   }
 
+  fun computeHash(string: String): String = computeHash(string.byteInputStream())
+
   fun computeHash(stream: InputStream): String {
     val hash = Algorithm.XXH3_128.Seeded(SEED.toLong()).createDigest()
 
@@ -37,7 +39,7 @@ class Hasher {
   }
 
   @OptIn(ExperimentalUnsignedTypes::class)
-  private fun ByteArray.toHexString(): String =
+  fun ByteArray.toHexString(): String =
     asUByteArray().joinToString("") {
       it.toString(16).padStart(2, '0')
     }

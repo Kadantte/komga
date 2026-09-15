@@ -1,5 +1,7 @@
 package org.gotson.komga.benchmark.rest
 
+import org.gotson.komga.domain.model.BookSearch
+import org.gotson.komga.domain.model.SeriesSearch
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.Level
 import org.openjdk.jmh.annotations.OutputTimeUnit
@@ -23,18 +25,20 @@ class UnsortedBenchmark : AbstractRestBenchmark() {
 
     // find series with most books
     biggestSeriesId =
-      seriesController.getAllSeries(principal, page = PageRequest.of(0, 1, Sort.by(Sort.Order.desc("booksCount"))))
-        .content.first()
+      seriesController
+        .getSeries(principal, page = PageRequest.of(0, 1, Sort.by(Sort.Order.desc("booksCount"))), search = SeriesSearch())
+        .content
+        .first()
         .id
   }
 
   @Benchmark
   fun getAllSeries() {
-    seriesController.getAllSeries(principal, page = Pageable.ofSize(pageSize))
+    seriesController.getSeries(principal, page = Pageable.ofSize(pageSize), search = SeriesSearch())
   }
 
   @Benchmark
   fun getAllBooks() {
-    bookController.getAllBooks(principal, page = Pageable.ofSize(pageSize))
+    bookController.getBooks(principal, page = Pageable.ofSize(pageSize), search = BookSearch())
   }
 }

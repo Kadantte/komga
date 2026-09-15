@@ -3,50 +3,55 @@ package org.gotson.komga.infrastructure.jooq.main
 import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.domain.model.ThumbnailBook
 import org.gotson.komga.domain.persistence.ThumbnailBookRepository
-import org.gotson.komga.infrastructure.jooq.insertTempStrings
-import org.gotson.komga.infrastructure.jooq.selectTempStrings
+import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
+import org.gotson.komga.infrastructure.jooq.TempTable.Companion.withTempTable
 import org.gotson.komga.jooq.main.Tables
 import org.gotson.komga.jooq.main.tables.records.ThumbnailBookRecord
 import org.jooq.DSLContext
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.PageImpl
-import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.net.URL
 
 @Component
 class ThumbnailBookDao(
-  private val dsl: DSLContext,
-  @Value("#{@komgaProperties.database.batchChunkSize}") private val batchSize: Int,
-) : ThumbnailBookRepository {
+  dslRW: DSLContext,
+  @Qualifier("dslContextRO") dslRO: DSLContext,
+  @param:Value("#{@komgaProperties.database.batchChunkSize}") private val batchSize: Int,
+) : SplitDslDaoBase(dslRW, dslRO),
+  ThumbnailBookRepository {
   private val tb = Tables.THUMBNAIL_BOOK
+  private val b = Tables.BOOK
 
   override fun findAllByBookId(bookId: String): Collection<ThumbnailBook> =
-    dsl.selectFrom(tb)
+    dslRO
+      .selectFrom(tb)
       .where(tb.BOOK_ID.eq(bookId))
       .fetchInto(tb)
       .map { it.toDomain() }
 
   override fun findAllByBookIdAndType(
     bookId: String,
-    type: ThumbnailBook.Type,
+    type: Set<ThumbnailBook.Type>,
   ): Collection<ThumbnailBook> =
-    dsl.selectFrom(tb)
+    dslRO
+      .selectFrom(tb)
       .where(tb.BOOK_ID.eq(bookId))
-      .and(tb.TYPE.eq(type.toString()))
+      .and(tb.TYPE.`in`(type.map { it.name }))
       .fetchInto(tb)
       .map { it.toDomain() }
 
   override fun findByIdOrNull(thumbnailId: String): ThumbnailBook? =
-    dsl.selectFrom(tb)
+    dslRO
+      .selectFrom(tb)
       .where(tb.ID.eq(thumbnailId))
       .fetchOneInto(tb)
       ?.toDomain()
 
   override fun findSelectedByBookIdOrNull(bookId: String): ThumbnailBook? =
-    dsl.selectFrom(tb)
+    dslRO
+      .selectFrom(tb)
       .where(tb.BOOK_ID.eq(bookId))
       .and(tb.SELECTED.isTrue)
       .limit(1)
@@ -54,37 +59,41 @@ class ThumbnailBookDao(
       .map { it.toDomain() }
       .firstOrNull()
 
-  override fun findAllWithoutMetadata(pageable: Pageable): Page<ThumbnailBook> {
-    val query =
-      dsl.selectFrom(tb)
-        .where(tb.FILE_SIZE.eq(0))
-        .or(tb.MEDIA_TYPE.eq(""))
-        .or(tb.WIDTH.eq(0))
-        .or(tb.HEIGHT.eq(0))
-
-    val count = dsl.fetchCount(query)
-    val items =
-      query
-        .apply { if (pageable.isPaged) limit(pageable.pageSize).offset(pageable.offset) }
-        .fetchInto(tb)
-        .map { it.toDomain() }
-
-    return PageImpl(items, pageable, count.toLong())
-  }
-
   override fun findAllBookIdsByThumbnailTypeAndDimensionSmallerThan(
     type: ThumbnailBook.Type,
     size: Int,
   ): Collection<String> =
-    dsl.select(tb.BOOK_ID)
+    dslRO
+      .select(tb.BOOK_ID)
       .from(tb)
       .where(tb.TYPE.eq(type.toString()))
       .and(tb.WIDTH.lt(size))
       .and(tb.HEIGHT.lt(size))
       .fetch(tb.BOOK_ID)
 
+  override fun existsById(thumbnailId: String): Boolean = dslRO.fetchExists(tb, tb.ID.eq(thumbnailId))
+
+  override fun getLibraryIdOrNull(thumbnailId: String): String? =
+    dslRO
+      .select(b.LIBRARY_ID)
+      .from(tb)
+      .leftJoin(b)
+      .on(tb.BOOK_ID.eq(b.ID))
+      .where(tb.ID.eq(thumbnailId))
+      .fetchOne(b.LIBRARY_ID)
+
+  override fun getSeriesIdOrNull(thumbnailId: String): String? =
+    dslRO
+      .select(b.SERIES_ID)
+      .from(tb)
+      .leftJoin(b)
+      .on(tb.BOOK_ID.eq(b.ID))
+      .where(tb.ID.eq(thumbnailId))
+      .fetchOne(b.SERIES_ID)
+
   override fun insert(thumbnail: ThumbnailBook) {
-    dsl.insertInto(tb)
+    dslRW
+      .insertInto(tb)
       .set(tb.ID, thumbnail.id)
       .set(tb.BOOK_ID, thumbnail.bookId)
       .set(tb.THUMBNAIL, thumbnail.thumbnail)
@@ -99,7 +108,8 @@ class ThumbnailBookDao(
   }
 
   override fun update(thumbnail: ThumbnailBook) {
-    dsl.update(tb)
+    dslRW
+      .update(tb)
       .set(tb.BOOK_ID, thumbnail.bookId)
       .set(tb.THUMBNAIL, thumbnail.thumbnail)
       .set(tb.URL, thumbnail.url?.toString())
@@ -113,29 +123,17 @@ class ThumbnailBookDao(
       .execute()
   }
 
-  override fun updateMetadata(thumbnails: Collection<ThumbnailBook>) {
-    dsl.batched { c ->
-      thumbnails.forEach {
-        c.dsl().update(tb)
-          .set(tb.MEDIA_TYPE, it.mediaType)
-          .set(tb.WIDTH, it.dimension.width)
-          .set(tb.HEIGHT, it.dimension.height)
-          .set(tb.FILE_SIZE, it.fileSize)
-          .where(tb.ID.eq(it.id))
-          .execute()
-      }
-    }
-  }
-
   @Transactional
   override fun markSelected(thumbnail: ThumbnailBook) {
-    dsl.update(tb)
+    dslRW
+      .update(tb)
       .set(tb.SELECTED, false)
       .where(tb.BOOK_ID.eq(thumbnail.bookId))
       .and(tb.ID.ne(thumbnail.id))
       .execute()
 
-    dsl.update(tb)
+    dslRW
+      .update(tb)
       .set(tb.SELECTED, true)
       .where(tb.BOOK_ID.eq(thumbnail.bookId))
       .and(tb.ID.eq(thumbnail.id))
@@ -143,25 +141,26 @@ class ThumbnailBookDao(
   }
 
   override fun delete(thumbnailBookId: String) {
-    dsl.deleteFrom(tb).where(tb.ID.eq(thumbnailBookId)).execute()
+    dslRW.deleteFrom(tb).where(tb.ID.eq(thumbnailBookId)).execute()
   }
 
   override fun deleteByBookId(bookId: String) {
-    dsl.deleteFrom(tb).where(tb.BOOK_ID.eq(bookId)).execute()
+    dslRW.deleteFrom(tb).where(tb.BOOK_ID.eq(bookId)).execute()
   }
 
   @Transactional
   override fun deleteByBookIds(bookIds: Collection<String>) {
-    dsl.insertTempStrings(batchSize, bookIds)
-
-    dsl.deleteFrom(tb).where(tb.BOOK_ID.`in`(dsl.selectTempStrings())).execute()
+    dslRW.withTempTable(batchSize, bookIds).use {
+      dslRW.deleteFrom(tb).where(tb.BOOK_ID.`in`(it.selectTempStrings())).execute()
+    }
   }
 
   override fun deleteByBookIdAndType(
     bookId: String,
     type: ThumbnailBook.Type,
   ) {
-    dsl.deleteFrom(tb)
+    dslRW
+      .deleteFrom(tb)
       .where(tb.BOOK_ID.eq(bookId))
       .and(tb.TYPE.eq(type.toString()))
       .execute()
